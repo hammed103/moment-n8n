@@ -6,6 +6,7 @@ COPY workflows/ /home/node/.n8n/workflows-import/
 ENV N8N_PORT=${PORT:-5678}
 ENV N8N_PROTOCOL=https
 ENV GENERIC_TIMEZONE=America/New_York
+ENV QUEUE_HEALTH_CHECK_ACTIVE=true
 
 # Write Google credentials from env var at startup
 CMD sh -c 'echo "$GOOGLE_CREDENTIALS_JSON" > /home/node/google-credentials.json && n8n start'
