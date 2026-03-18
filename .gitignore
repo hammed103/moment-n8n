@@ -1,0 +1,16 @@
+# Service account keys - DO NOT commit
+peak-lattice-398418-eeb02e45c896.json
+*.json.bak
+
+# Environment
+.env
+
+# n8n data
+.n8n/
+
+# Chat logs with secrets
+more_chat.txt
+chat.txt
+
+# OS files
+.DS_Store

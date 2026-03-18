@@ -1,0 +1,25 @@
+This project involves building an AI-powered lead generation system that identifies high-value luxury watch collectors from social media platforms such as Instagram and TikTok.
+
+
+
+The system will automatically:
+
+
+
+Scrape profiles from targeted accounts and relevant watch-related audiences
+
+
+
+Collect public profile information such as bio, follower count, engagement, and recent posts
+
+
+
+Use AI to classify profiles into collector, dealer, or non-relevant accounts
+
+
+
+Identify likely watch brand interests (e.g., Rolex, Patek Philippe, Audemars Piguet, Richard Mille)
+
+
+
+Store all structured data in Google Sheets for easy review and filtering

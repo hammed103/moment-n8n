@@ -1,0 +1,169 @@
+============================================================
+ LUXURY WATCH LEAD GEN - SETUP GUIDE
+ AI-Powered Lead Generation System for Watch Collectors
+============================================================
+
+WHAT WE'RE BUILDING
+--------------------
+An automated system that:
+1. Scrapes followers of luxury watch Instagram accounts
+2. Collects their profile data (bio, posts, follower count)
+3. Uses Claude AI to classify them (collector/dealer/enthusiast/irrelevant)
+4. Identifies which watch brands they're into (Rolex, Patek, AP, RM)
+5. Stores everything in Google Sheets for easy review
+
+
+TOOLS & ACCOUNTS NEEDED
+------------------------
+1. n8n          - Workflow automation (where the logic runs)
+2. Apify        - Instagram/TikTok scraping (you already have an account)
+3. Claude API   - AI classification (we provide this)
+4. Google Sheets - Data output (your existing sheet)
+
+
+SETUP STEPS
+-----------
+
+STEP 1: n8n Variables (set these in n8n Settings > Variables)
+
+  APIFY_TOKEN          = Your Apify API token (from apify.com/account#/integrations)
+  SEED_SHEET_URL       = https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/
+  OUTPUT_SHEET_URL     = URL of the output Google Sheet (we'll create this)
+  ANTHROPIC_API_KEY    = Claude API key (we provide this)
+  FOLLOWERS_PER_SEED   = 100 (number of followers to scrape per seed account)
+
+
+STEP 2: Google Sheets Setup
+
+  Create a new Google Sheet with 2 tabs:
+
+  Tab 1: "Raw Profiles" (columns):
+  - username
+  - platform
+  - full_name
+  - bio
+  - follower_count
+  - following_count
+  - post_count
+  - is_verified
+  - recent_captions
+  - hashtags
+  - scrape_date
+  - seed_account
+
+  Tab 2: "Classified Leads" (columns):
+  - username
+  - platform
+  - full_name
+  - bio
+  - follower_count
+  - following_count
+  - post_count
+  - is_verified
+  - profile_url
+  - classification
+  - confidence
+  - watch_brands
+  - net_worth_tier
+  - specific_watches
+  - priority_score
+  - ai_reasoning
+  - seed_account
+  - classified_date
+
+
+STEP 3: Google Sheets Credentials in n8n
+
+  1. Go to n8n > Credentials > Add New > Google Sheets OAuth2
+  2. Follow the OAuth flow to connect your Google account
+  3. Make sure the credential has access to both sheets
+
+
+STEP 4: Seed Accounts Sheet Format
+
+  Your seed accounts sheet should have a column called "instagram_handle"
+  with just the username (no @ symbol). Example:
+
+  instagram_handle
+  hodinkee
+  watchesofinstagram
+  rolexofficial
+  patekphilippe
+  audemarspiguet
+  ...
+
+
+STEP 5: Import Workflows
+
+  1. Open n8n
+  2. Go to Workflows > Import from File
+  3. Import: milestone1_instagram_scraper.json
+  4. Import: milestone2_ai_classifier.json
+  5. Update the Google Sheets credential in each Google Sheets node
+  6. Set the n8n variables (Step 1)
+
+
+STEP 6: Test Run
+
+  1. Run Milestone 1 workflow with 1-2 seed accounts first
+  2. Check the "Raw Profiles" tab in Google Sheets
+  3. If data looks good, run Milestone 2 to classify
+  4. Review "Classified Leads" tab for AI output quality
+  5. Adjust and scale up
+
+
+MILESTONE BREAKDOWN
+--------------------
+Milestone 1 ($200) - Scraping Pipeline
+  - Apify scrapes followers of seed accounts
+  - Profile data stored in Google Sheets
+  - Test batch of 50-100 profiles
+  - Due: March 10
+
+Milestone 2 ($200) - AI Classification
+  - Claude AI classifies each profile
+  - Collector/dealer/enthusiast/irrelevant
+  - Watch brand detection
+  - Net worth estimation
+  - Priority scoring
+
+Milestone 3 ($200) - Automation + TikTok
+  - Scheduled automatic runs (every 48-72 hrs)
+  - TikTok platform added
+  - Notifications for high-priority leads
+  - Dashboard/summary tab
+
+
+WHAT I NEED FROM YOU
+---------------------
+1. Apify API token (from your Apify account settings)
+2. Confirm your seed accounts spreadsheet is ready
+3. Google Sheets access (I'll need edit access to set up the output sheet)
+4. Decide: n8n Cloud ($20/mo) or self-hosted?
+
+
+CLASSIFICATION OUTPUT EXPLAINED
+--------------------------------
+Each lead gets tagged with:
+
+  classification:    collector / dealer / enthusiast / irrelevant
+  confidence:        high / medium / low (how sure the AI is)
+  watch_brands:      Which brands they're into (Rolex, Patek, AP, RM)
+  net_worth_tier:    ultra-high / high / medium / unknown
+  specific_watches:  Any specific models spotted in their posts
+  priority_score:    1-10 (10 = highest value lead to pursue)
+  ai_reasoning:      Why the AI classified them that way
+
+Example output:
+  username:          @john_watches
+  classification:    collector
+  confidence:        high
+  watch_brands:      Rolex, Patek Philippe
+  net_worth_tier:    ultra-high
+  specific_watches:  Rolex Daytona, Patek Nautilus 5711
+  priority_score:    9
+  ai_reasoning:      "Profile shows multiple luxury watch photos with
+                      personal collection. Bio mentions 'horologist'.
+                      Posts feature rare Patek models suggesting
+                      ultra-high net worth collector."
+============================================================

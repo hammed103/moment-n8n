@@ -1,0 +1,894 @@
+{
+  "name": "Luxury Watch Lead Gen - AI Classifier",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "9479a189-33ab-4718-a733-c9a3b7062e8c",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2528,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 552648307,
+          "mode": "list",
+          "cachedResultName": "Profiles",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/edit#gid=552648307"
+        },
+        "options": {}
+      },
+      "id": "7423450d-813a-4847-9d33-3922715c7f0d",
+      "name": "Read Raw Profiles",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -2304,
+        -272
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "0kIjsxY1xNUQys1T",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1296874695,
+          "mode": "list",
+          "cachedResultName": "Classified Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/edit#gid=1296874695"
+        },
+        "options": {}
+      },
+      "id": "634a6e6c-00cd-4862-b6bb-dd512fcc9b31",
+      "name": "Read Already Classified",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -2304,
+        -80
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "0kIjsxY1xNUQys1T",
+          "name": "Google Sheets account 2"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawProfiles = $('Read Raw Profiles').all();\nlet classified = [];\ntry {\n  classified = $('Read Already Classified').all();\n} catch (e) {\n  classified = [];\n}\n\nconst classifiedUsernames = new Set(\n  classified\n    .filter(item => item.json && item.json.username)\n    .map(item => item.json.username.toLowerCase())\n);\n\nconst seen = new Set();\nconst unclassified = [];\n\nfor (const profile of rawProfiles) {\n  const username = (profile.json.username || '').trim().toLowerCase();\n  if (!username) continue;\n  if (seen.has(username)) continue;\n  if (classifiedUsernames.has(username)) continue;\n  seen.add(username);\n  unclassified.push(profile);\n}\n\nreturn unclassified.slice(0, 100);\n"
+      },
+      "id": "adc27cb8-ab7d-4323-bd30-af1af3f4f0ca",
+      "name": "Filter Unclassified",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1856,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "d8f8c7bf-90ee-4bad-b9ae-29263bbd2bd8",
+      "name": "Process One at a Time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1632,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare image URLs for Gemini vision analysis\n// Select up to 8 images to analyze (Gemini can handle multiple)\nconst profile = $json;\nconst imageUrlsRaw = (profile.image_urls || '').split(',').map(u => u.trim()).filter(u => u && u.startsWith('http'));\nconst videoUrlsRaw = (profile.video_urls || '').split(',').map(u => u.trim()).filter(u => u && u.startsWith('http'));\n\n// Take up to 8 images and 2 video thumbnails for analysis\nconst imagesToAnalyze = imageUrlsRaw.slice(0, 8);\n// For videos, we can still send URLs - Gemini can handle video URLs\nconst videosToAnalyze = videoUrlsRaw.slice(0, 2);\n\nreturn [{\n  json: {\n    ...profile,\n    _images_to_analyze: imagesToAnalyze,\n    _videos_to_analyze: videosToAnalyze,\n    _has_media: imagesToAnalyze.length > 0 || videosToAnalyze.length > 0\n  }\n}];"
+      },
+      "id": "63e61f99-541d-4c3c-945a-d55c5d231ea5",
+      "name": "Prepare Media for Vision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1408,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-media",
+              "leftValue": "={{ $json._has_media }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "590e1921-aba5-48ba-bd70-d8f84b63bf21",
+      "name": "Has Media?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1184,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build combined Gemini request - vision + classification in one call\nconst profile = $json;\nconst images = profile._images_to_analyze || [];\nconst videos = profile._videos_to_analyze || [];\n\nconst parts = [];\n\n// Download images as base64 first\nlet downloadedCount = 0;\nconst maxImages = 8;\n\nfor (const imgUrl of images.slice(0, maxImages)) {\n  try {\n    const buffer = await this.helpers.httpRequest({\n      method: 'GET',\n      url: imgUrl,\n      encoding: 'arraybuffer',\n      returnFullResponse: false\n    });\n    const base64 = Buffer.from(buffer).toString('base64');\n    parts.push({\n      inlineData: {\n        mimeType: 'image/jpeg',\n        data: base64\n      }\n    });\n    downloadedCount++;\n  } catch (e) {\n    // Skip failed downloads\n  }\n}\n\n// Combined prompt: analyze images + profile data + classify\nparts.push({\n  text: `You are an expert luxury watch analyst classifying Instagram profiles for a luxury watch sourcing business. The business owner wants to find wealthy watch collectors who own rare/valuable watches that can be sourced or purchased.\n\n== IMAGES ==\nAbove are ${downloadedCount} recent Instagram post images from @${profile.username}. Analyze them for watches, luxury items, and lifestyle indicators.\n\n== PROFILE DATA ==\nUsername: ${profile.username || ''}\nFull Name: ${profile.full_name || ''}\nBio: ${profile.bio || ''}\nFollowers: ${profile.follower_count || 0} | Following: ${profile.following_count || 0} | Posts: ${profile.post_count || 0}\nVerified: ${profile.is_verified || false} | Business Account: ${profile.is_business || false}\nBusiness Category: ${profile.business_category || ''}\nWebsite: ${profile.external_url || ''}\nEmail Found: ${profile.email_in_bio || ''} | Phone Found: ${profile.phone_in_bio || ''}\nEngagement Rate: ${profile.engagement_rate || ''}\nAvg Likes: ${profile.avg_likes || 0} | Avg Comments: ${profile.avg_comments || 0}\n\n== RECENT POST CAPTIONS ==\n${(profile.recent_captions || 'N/A').substring(0, 3000)}\n\n== HASHTAGS USED ==\n${profile.hashtags || 'N/A'}\n\n== MENTIONS ==\n${profile.mentions || 'N/A'}\n\n== POST LOCATIONS ==\n${profile.recent_post_locations || 'N/A'}\n\n== TASK ==\nCombine your analysis of the images with the profile text data to produce an accurate classification.\n\nReturn ONLY valid JSON:\n{\n  \"classification\": \"collector\" | \"dealer\" | \"replica_dealer\" | \"enthusiast\" | \"irrelevant\",\n  \"confidence\": \"high\" | \"medium\" | \"low\",\n  \"watch_brands\": [\"list of brands detected from images AND text\"],\n  \"specific_watches\": [\n    {\n      \"brand\": \"brand\",\n      \"model\": \"model\",\n      \"reference\": \"ref if known\",\n      \"estimated_value_usd\": \"range\",\n      \"source\": \"image\" | \"text\" | \"both\"\n    }\n  ],\n  \"total_collection_value_estimate\": \"estimated total value range\",\n  \"net_worth_tier\": \"ultra-high\" | \"high\" | \"medium\" | \"unknown\",\n  \"wealth_signals\": [\"specific indicators: cars, locations, lifestyle items spotted in images or text\"],\n  \"ownership_type\": \"personal_collector\" | \"dealer_business\" | \"flipper\" | \"influencer\" | \"enthusiast_no_ownership\" | \"unclear\",\n  \"sourcing_potential\": \"high\" | \"medium\" | \"low\" | \"none\",\n  \"sourcing_reasoning\": \"why this person might or might not sell/source watches\",\n  \"approach_suggestion\": \"how the business should approach this person\",\n  \"priority_score\": 1-10,\n  \"image_summary\": \"brief 1-2 sentence summary of what the images show\",\n  \"reasoning\": \"2-3 sentence explanation of classification\"\n}\n\nCRITICAL RULES - READ CAREFULLY:\n1. ONLY report wealth signals you can DIRECTLY observe in images or text. NEVER fabricate or assume wealth signals like \"private jet\", \"Ferrari\", \"designer clothing\" unless you can clearly see them. If unsure, do NOT include them.\n2. Distinguish between OWNERSHIP and CONTENT SHARING. Reposting watch photos, stock images, or brand marketing is NOT ownership. Look for wrist shots with the SAME wrist/setting, personal collection photos, or explicit ownership language.\n3. Be SKEPTICAL of accounts with low followers (<500) claiming ultra-high net worth collections. Small accounts rarely own $500K+ in watches.\n4. Check for REPLICA/FAKE indicators: bio mentions \"factory\", \"China factory\", \"AAA quality\", \"1:1\", \"clone\", \"copy\", \"rep\", wholesale from China, suspiciously low prices for luxury watches. If detected, classify as \"replica_dealer\" and set priority_score to 0.\n5. If someone\\'s primary profession is NOT watches (e.g., realtor, fitness influencer) and they occasionally post watch content, they are likely an ENTHUSIAST, not a collector - unless you see clear evidence of multiple owned luxury pieces.\n6. Do NOT give priority_score above 7 unless you have STRONG evidence of actual ownership of identifiable luxury watches worth $50K+.\n7. net_worth_tier should be \"unknown\" unless there are multiple clear, verified wealth indicators. Do not default to \"ultra-high\".\n\nClassification guide:\n- COLLECTOR: Owns watches personally with VERIFIED evidence (personal wrist shots, same wrist appearing multiple times, explicit ownership statements). HIGH sourcing potential if they have rare pieces.\n- DEALER: Business account, inventory posts, for-sale language, multiple watches in stock. Could be sourcing partner or competitor.\n- REPLICA_DEALER: Sells fake/replica watches. Bio mentions factory, China manufacturing, clone, 1:1 quality, or images show obvious fakes. Priority score MUST be 0.\n- ENTHUSIAST: Appreciates watches, follows the scene, shares content, but LIMITED or NO ownership signals. Includes people whose main profession is unrelated but who occasionally post watch content.\n- IRRELEVANT: No meaningful watch content, bots, unrelated.\n\nPriority scoring (BE CONSERVATIVE):\n10 = Verified collector with CONFIRMED ownership of multiple rare pieces ($100K+ collection) AND strong wealth signals visible in images\n8-9 = Clear collector with multiple luxury watches they demonstrably OWN, consistent wealth signals\n6-7 = Probable collector with some ownership evidence, or established dealer with genuine luxury inventory\n4-5 = Enthusiast with limited ownership, or accounts with mixed signals\n2-3 = Low relevance, content sharers without ownership, budget watch collectors\n1 = Barely relevant\n0 = Replica dealers, fakes, spam`\n});\n\nconst geminiBody = {\n  contents: [{ parts: parts }],\n  generationConfig: {\n    temperature: 0.2,\n    maxOutputTokens: 8192\n  }\n};\n\nreturn [{\n  json: {\n    ...profile,\n    _gemini_body: JSON.stringify(geminiBody),\n    _image_count: downloadedCount,\n    _video_count: videos.length\n  }\n}];\n"
+      },
+      "id": "639bfb25-8779-43f6-ad98-b082594afddb",
+      "name": "Build Gemini Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        -272
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json._gemini_body }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "084e2fd6-2cea-4fb8-b1ef-1b28b87f7f60",
+      "name": "Gemini Classification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -736,
+        -272
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// No media available - build text-only Gemini classification request\nconst profile = $json;\n\nconst parts = [{\n  text: `You are an expert luxury watch analyst classifying Instagram profiles for a luxury watch sourcing business. The business owner wants to find wealthy watch collectors who own rare/valuable watches that can be sourced or purchased.\n\nNOTE: No images were available for this profile. Classify based on text data only.\n\n== PROFILE DATA ==\nUsername: ${profile.username || ''}\nFull Name: ${profile.full_name || ''}\nBio: ${profile.bio || ''}\nFollowers: ${profile.follower_count || 0} | Following: ${profile.following_count || 0} | Posts: ${profile.post_count || 0}\nVerified: ${profile.is_verified || false} | Business Account: ${profile.is_business || false}\nBusiness Category: ${profile.business_category || ''}\nWebsite: ${profile.external_url || ''}\nEmail Found: ${profile.email_in_bio || ''} | Phone Found: ${profile.phone_in_bio || ''}\nEngagement Rate: ${profile.engagement_rate || ''}\nAvg Likes: ${profile.avg_likes || 0} | Avg Comments: ${profile.avg_comments || 0}\n\n== RECENT POST CAPTIONS ==\n${(profile.recent_captions || 'N/A').substring(0, 3000)}\n\n== HASHTAGS USED ==\n${profile.hashtags || 'N/A'}\n\n== MENTIONS ==\n${profile.mentions || 'N/A'}\n\n== POST LOCATIONS ==\n${profile.recent_post_locations || 'N/A'}\n\n== TASK ==\nClassify this profile based on the available text data.\n\nReturn ONLY valid JSON:\n{\n  \"classification\": \"collector\" | \"dealer\" | \"replica_dealer\" | \"enthusiast\" | \"irrelevant\",\n  \"confidence\": \"high\" | \"medium\" | \"low\",\n  \"watch_brands\": [\"list of brands detected from text\"],\n  \"specific_watches\": [],\n  \"total_collection_value_estimate\": \"unknown\",\n  \"net_worth_tier\": \"ultra-high\" | \"high\" | \"medium\" | \"unknown\",\n  \"wealth_signals\": [],\n  \"ownership_type\": \"personal_collector\" | \"dealer_business\" | \"flipper\" | \"influencer\" | \"enthusiast_no_ownership\" | \"unclear\",\n  \"sourcing_potential\": \"high\" | \"medium\" | \"low\" | \"none\",\n  \"sourcing_reasoning\": \"reasoning\",\n  \"approach_suggestion\": \"suggestion\",\n  \"priority_score\": 1-10,\n  \"image_summary\": \"No images available for analysis\",\n  \"reasoning\": \"2-3 sentence explanation\"\n}\n\nCRITICAL RULES - READ CAREFULLY:\n1. ONLY report wealth signals you can DIRECTLY observe in the text data. NEVER fabricate or assume wealth signals. If unsure, do NOT include them.\n2. Without images, be EXTRA conservative. You cannot verify ownership from text alone. Default to lower confidence and priority scores.\n3. Check for REPLICA/FAKE indicators: bio mentions \"factory\", \"China factory\", \"AAA quality\", \"1:1\", \"clone\", \"copy\", \"rep\", wholesale from China, suspiciously low prices. If detected, classify as \"replica_dealer\" and set priority_score to 0.\n4. If someone\\'s primary profession is NOT watches (e.g., realtor, fitness influencer), classify as ENTHUSIAST unless text strongly proves otherwise.\n5. Without image verification, do NOT give priority_score above 6.\n6. net_worth_tier should default to \"unknown\" without images.\n\nClassification guide:\n- COLLECTOR: Text strongly indicates personal watch ownership (bio says collector, captions describe personal pieces).\n- DEALER: Business account, for-sale language, inventory descriptions, trade references.\n- REPLICA_DEALER: Sells fake/replica watches. Bio mentions factory, China manufacturing, clone, 1:1 quality. Priority score MUST be 0.\n- ENTHUSIAST: Appreciates watches, follows the scene, but limited ownership signals from text alone.\n- IRRELEVANT: No meaningful watch content, bots, unrelated.\n\nPriority scoring (BE CONSERVATIVE - no images available):\n6 = Strong text evidence of genuine luxury watch ownership\n4-5 = Some ownership signals in text, but unverified without images\n2-3 = Enthusiast or unclear signals\n1 = Barely relevant\n0 = Replica dealers, fakes, spam`\n}];\n\nconst geminiBody = {\n  contents: [{ parts: parts }],\n  generationConfig: {\n    temperature: 0.2,\n    maxOutputTokens: 8192\n  }\n};\n\nreturn [{\n  json: {\n    ...profile,\n    _gemini_body: JSON.stringify(geminiBody),\n    _image_count: 0,\n    _video_count: 0\n  }\n}];"
+      },
+      "id": "6a9e786c-2fad-4692-8559-fac1f3266673",
+      "name": "No Media Fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -512,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Gemini combined classification response\nconst geminiResponse = $json;\nconst profileData = $('Build Gemini Request').first()?.json || $('No Media Fallback').first()?.json || $('Prepare Media for Vision').item.json;\n\nlet classification = {};\n\ntry {\n  const textContent = geminiResponse.candidates[0].content.parts.find(p => p.text)?.text || '';\n  const jsonMatch = textContent.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    classification = JSON.parse(jsonMatch[0]);\n  }\n} catch (e) {\n  classification = {\n    classification: 'error',\n    confidence: 'low',\n    watch_brands: [],\n    specific_watches: [],\n    total_collection_value_estimate: 'unknown',\n    net_worth_tier: 'unknown',\n    wealth_signals: [],\n    ownership_type: 'unclear',\n    sourcing_potential: 'none',\n    sourcing_reasoning: '',\n    approach_suggestion: '',\n    priority_score: 0,\n    image_summary: 'Analysis failed',\n    reasoning: `Failed to parse Gemini response: ${e.message}`\n  };\n}\n\n// Format specific watches for sheet\nconst watchList = Array.isArray(classification.specific_watches)\n  ? classification.specific_watches.map(w => {\n      const parts = [w.brand, w.model, w.reference].filter(Boolean);\n      const val = w.estimated_value_usd ? ` (~${w.estimated_value_usd})` : '';\n      return parts.join(' ') + val;\n    }).join(' | ')\n  : (classification.specific_watches || '');\n\nreturn [{\n  json: {\n    username: profileData.username,\n    platform: profileData.platform || 'instagram',\n    full_name: profileData.full_name,\n    bio: profileData.bio,\n    follower_count: profileData.follower_count,\n    following_count: profileData.following_count,\n    post_count: profileData.post_count,\n    is_verified: profileData.is_verified,\n    is_business: profileData.is_business,\n    business_category: profileData.business_category,\n    external_url: profileData.external_url,\n    email_in_bio: profileData.email_in_bio,\n    phone_in_bio: profileData.phone_in_bio,\n    engagement_rate: profileData.engagement_rate,\n    profile_url: profileData.profile_url || `https://instagram.com/${profileData.username}`,\n    seed_account: profileData.seed_account,\n    seed_type: profileData.seed_type,\n    classification: classification.classification || 'unknown',\n    confidence: classification.confidence || 'low',\n    watch_brands: Array.isArray(classification.watch_brands) ? classification.watch_brands.join(', ') : (classification.watch_brands || ''),\n    specific_watches: watchList,\n    total_collection_value: classification.total_collection_value_estimate || 'unknown',\n    net_worth_tier: classification.net_worth_tier || 'unknown',\n    wealth_signals: Array.isArray(classification.wealth_signals) ? classification.wealth_signals.join(', ') : (classification.wealth_signals || ''),\n    ownership_type: classification.ownership_type || 'unclear',\n    sourcing_potential: classification.sourcing_potential || 'none',\n    sourcing_reasoning: classification.sourcing_reasoning || '',\n    approach_suggestion: classification.approach_suggestion || '',\n    priority_score: classification.priority_score || 0,\n    ai_reasoning: classification.reasoning || '',\n    vision_summary: classification.image_summary || 'No vision analysis',\n    images_analyzed: profileData._image_count || 0,\n    classified_date: new Date().toISOString().split('T')[0]\n  }\n}];"
+      },
+      "id": "5005626d-661e-4d9b-9a82-13a9220d849d",
+      "name": "Parse Final Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1296874695,
+          "mode": "list",
+          "cachedResultName": "Classified Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/edit#gid=1296874695"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": ["username"],
+          "schema": [
+            {
+              "id": "username",
+              "displayName": "username",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "platform",
+              "displayName": "platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "bio",
+              "displayName": "bio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "follower_count",
+              "displayName": "follower_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "following_count",
+              "displayName": "following_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "post_count",
+              "displayName": "post_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "is_verified",
+              "displayName": "is_verified",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "is_business",
+              "displayName": "is_business",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "business_category",
+              "displayName": "business_category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "external_url",
+              "displayName": "external_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_in_bio",
+              "displayName": "email_in_bio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone_in_bio",
+              "displayName": "phone_in_bio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "engagement_rate",
+              "displayName": "engagement_rate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "profile_url",
+              "displayName": "profile_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "seed_account",
+              "displayName": "seed_account",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "seed_type",
+              "displayName": "seed_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "classification",
+              "displayName": "classification",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "watch_brands",
+              "displayName": "watch_brands",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "specific_watches",
+              "displayName": "specific_watches",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "total_collection_value",
+              "displayName": "total_collection_value",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "net_worth_tier",
+              "displayName": "net_worth_tier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "wealth_signals",
+              "displayName": "wealth_signals",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ownership_type",
+              "displayName": "ownership_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sourcing_potential",
+              "displayName": "sourcing_potential",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sourcing_reasoning",
+              "displayName": "sourcing_reasoning",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "approach_suggestion",
+              "displayName": "approach_suggestion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "priority_score",
+              "displayName": "priority_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ai_reasoning",
+              "displayName": "ai_reasoning",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vision_summary",
+              "displayName": "vision_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "images_analyzed",
+              "displayName": "images_analyzed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "classified_date",
+              "displayName": "classified_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "f2e8cdfa-0eb7-47d8-89ea-22848ef5936e",
+      "name": "Write to Classified Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        384,
+        -176
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "0kIjsxY1xNUQys1T",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "is-relevant",
+              "leftValue": "={{ $json.classification }}",
+              "rightValue": "irrelevant",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "not-error",
+              "leftValue": "={{ $json.classification }}",
+              "rightValue": "error",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "not-unknown",
+              "leftValue": "={{ $json.classification }}",
+              "rightValue": "unknown",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "not-replica",
+              "leftValue": "={{ $json.classification }}",
+              "rightValue": "replica_dealer",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "is-relevant-check",
+      "name": "Is Relevant?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        608,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format clean output for Relevant Leads sheet\nconst d = $json;\nreturn [{\n  json: {\n    username: d.username,\n    full_name: d.full_name,\n    classification: d.classification,\n    priority_score: d.priority_score,\n    confidence: d.confidence,\n    profile_url: d.profile_url,\n    follower_count: d.follower_count,\n    post_count: d.post_count,\n    is_verified: d.is_verified,\n    is_business: d.is_business,\n    business_category: d.business_category,\n    bio: (d.bio || '').substring(0, 300),\n    watch_brands: d.watch_brands,\n    specific_watches: d.specific_watches,\n    total_collection_value: d.total_collection_value,\n    net_worth_tier: d.net_worth_tier,\n    ownership_type: d.ownership_type,\n    sourcing_potential: d.sourcing_potential,\n    approach_suggestion: d.approach_suggestion,\n    wealth_signals: d.wealth_signals,\n    email_in_bio: d.email_in_bio,\n    phone_in_bio: d.phone_in_bio,\n    external_url: d.external_url,\n    engagement_rate: d.engagement_rate,\n    vision_summary: d.vision_summary,\n    ai_reasoning: d.ai_reasoning,\n    seed_account: d.seed_account,\n    seed_type: d.seed_type,\n    classified_date: d.classified_date\n  }\n}];"
+      },
+      "id": "format-relevant",
+      "name": "Format Relevant Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        -272
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "Relevant Leads"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": ["username"],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "write-relevant-leads",
+      "name": "Write to Relevant Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1056,
+        -272
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "0kIjsxY1xNUQys1T",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -2080,
+        -176
+      ],
+      "id": "41e1020c-f850-492a-ba94-eb5e54de5ffa",
+      "name": "Merge"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Raw Profiles",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Already Classified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Raw Profiles": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Already Classified": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Filter Unclassified": {
+      "main": [
+        [
+          {
+            "node": "Process One at a Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process One at a Time": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Prepare Media for Vision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Media for Vision": {
+      "main": [
+        [
+          {
+            "node": "Has Media?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Media?": {
+      "main": [
+        [
+          {
+            "node": "Build Gemini Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Media Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Gemini Request": {
+      "main": [
+        [
+          {
+            "node": "Gemini Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Classification": {
+      "main": [
+        [
+          {
+            "node": "Parse Final Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Media Fallback": {
+      "main": [
+        [
+          {
+            "node": "Gemini Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Final Classification": {
+      "main": [
+        [
+          {
+            "node": "Write to Classified Leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Relevant?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to Classified Leads": {
+      "main": [
+        [
+          {
+            "node": "Process One at a Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Relevant?": {
+      "main": [
+        [
+          {
+            "node": "Format Relevant Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Format Relevant Lead": {
+      "main": [
+        [
+          {
+            "node": "Write to Relevant Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Filter Unclassified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "1d70223c-647c-4e0f-9e0c-70e43657967c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7fb706552f0a155555348b5d8fc2a5374cdfef0f181c5a5ffaa7ef0ef02bd1b0"
+  },
+  "id": "7xiY7bQHemct4zfH",
+  "tags": [
+    {
+      "updatedAt": "2026-03-09T00:09:39.025Z",
+      "createdAt": "2026-03-09T00:09:39.025Z",
+      "id": "B0wAAWooL3DimoUr",
+      "name": "luxury-watches"
+    },
+    {
+      "updatedAt": "2026-03-09T00:09:39.040Z",
+      "createdAt": "2026-03-09T00:09:39.040Z",
+      "id": "lwntsfcikWQwxyWk",
+      "name": "lead-gen"
+    },
+    {
+      "updatedAt": "2026-03-10T13:43:26.563Z",
+      "createdAt": "2026-03-10T13:43:26.563Z",
+      "id": "m0j8jp1Jmsbqh0zW",
+      "name": "milestone-2"
+    }
+  ]
+}

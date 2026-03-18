@@ -1,0 +1,458 @@
+{
+  "name": "Luxury Watch Lead Gen - Instagram Scraper",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-1",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byIndex",
+          "value": 0
+        },
+        "options": {}
+      },
+      "id": "sheets-read-1",
+      "name": "Read Seed Accounts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reset cross-seed dedup tracker at start of each execution\nconst staticData = $getWorkflowStaticData('global');\nstaticData.seenUsernames = {};\n\n// Flatten all 4 columns into individual rows with clean usernames\nconst allSeeds = [];\nconst seenUsernames = new Set();\n\nfunction extractUsername(url) {\n  if (!url || typeof url !== 'string') return '';\n  let clean = url.trim()\n    .replace(/^https?:\\/\\//i, '')\n    .replace(/^www\\./i, '')\n    .replace(/^instagram\\.com\\//i, '')\n    .replace(/\\/$/g, '')\n    .replace(/@/g, '');\n  if (clean.includes('/')) {\n    const parts = clean.split('/').filter(p => p.length > 0);\n    clean = parts[parts.length - 1];\n  }\n  return clean.toLowerCase();\n}\n\nconst columnMap = {\n  'Individual Collector': 'individual_collector',\n  'Collector/Page': 'collector_page',\n  'Dealer': 'dealer',\n  'Designer': 'designer',\n  'Auctioneer': 'auctioneer',\n  'Celebrities': 'celebrities',\n  'Media': 'media',\n  'Auction House': 'auction_house',\n  'Other Luxury Goods': 'other_luxury_goods',\n  'Collector\\'s Club': 'collectors_club'\n};\n\nfor (const row of $input.all()) {\n  for (const [col, seedType] of Object.entries(columnMap)) {\n    const rawValue = row.json[col];\n    if (!rawValue) continue;\n    const username = extractUsername(rawValue);\n    if (!username || seenUsernames.has(username)) continue;\n    seenUsernames.add(username);\n    allSeeds.push({\n      json: { username, seed_type: seedType, original_url: rawValue }\n    });\n  }\n}\n\nreturn allSeeds;"
+      },
+      "id": "code-flatten",
+      "name": "Flatten & Extract Usernames",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "batch-1",
+      "name": "Process Seeds",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.apify.com/v2/acts/datadoping~instagram-followers-scraper/runs?token={{ $env.APIFY_TOKEN }}&waitForFinish=300",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"usernames\": [\"{{ $('Process Seeds').item.json.username }}\"],\n  \"max_count\": 50\n}",
+        "options": {
+          "timeout": 360000
+        }
+      },
+      "id": "apify-followers",
+      "name": "Scrape Followers (Apify)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if the Apify scraper returned a valid result\nconst result = $json;\n\n// Check for errors or missing dataset ID\nif (!result || !result.data || !result.data.defaultDatasetId) {\n  // Scraper failed (private account, API error, etc.) - skip to next seed\n  return [{ json: { _skip: true, _error: 'No dataset returned - likely private account or scraper error' } }];\n}\n\n// Check if the run actually succeeded\nif (result.data.status === 'FAILED' || result.data.status === 'ABORTED') {\n  return [{ json: { _skip: true, _error: `Scraper run ${result.data.status}` } }];\n}\n\n// Valid result - pass through the dataset ID\nreturn [{ json: { datasetId: result.data.defaultDatasetId, _skip: false } }];"
+      },
+      "id": "check-follower-result",
+      "name": "Check Follower Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond-has-dataset",
+              "leftValue": "={{ $json._skip }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "false" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-valid-scrape",
+      "name": "Valid Scrape?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fetch follower dataset - always return at least one item so flow never dies\nconst datasetId = $json.datasetId;\nconst token = '{{ $env.APIFY_TOKEN }}';\n\ntry {\n  const response = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&format=json`);\n  if (!response.ok) {\n    return [{ json: { _skip: true, _error: `Dataset fetch failed: ${response.status}` } }];\n  }\n  const data = await response.json();\n  if (!Array.isArray(data) || data.length === 0) {\n    return [{ json: { _skip: true, _error: 'Empty dataset - no followers found' } }];\n  }\n  // Ensure each item is a proper object for n8n\n  return data.map(item => ({ json: typeof item === 'object' && item !== null && !Array.isArray(item) ? item : { _raw: item } }));\n} catch (e) {\n  return [{ json: { _skip: true, _error: `Fetch error: ${e.message}` } }];\n}"
+      },
+      "id": "get-followers",
+      "name": "Get Follower List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter out private accounts, normalize, and deduplicate across seeds\n// Use static data to track all processed usernames across loop iterations\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.seenUsernames) staticData.seenUsernames = {};\nconst globalSeen = staticData.seenUsernames;\n\nconst items = $input.all();\nlet seedUsername = 'unknown';\nlet seedType = 'unknown';\ntry {\n  const seedItem = $('Process Seeds').first();\n  seedUsername = seedItem.json.username || 'unknown';\n  seedType = seedItem.json.seed_type || 'unknown';\n} catch (e) {\n  // paired item unavailable, use defaults\n}\n\n// Handle error responses from HTTP nodes (private account, API error, etc.)\nconst firstItem = items[0]?.json || {};\nif (!items || items.length === 0 || firstItem.error || firstItem.statusCode >= 400 || !firstItem.username) {\n  return [{ json: { _skip: true } }];\n}\n\nconst followers = [];\nconst batchSeen = new Set();\n\nfor (const item of items) {\n  const p = item.json;\n  const username = (p.username || '').toLowerCase();\n  if (!username || batchSeen.has(username)) continue;\n  if (p.is_private) continue;\n  // Cross-seed dedup: skip if already processed from a previous seed\n  if (globalSeen[username]) continue;\n  batchSeen.add(username);\n  globalSeen[username] = true;\n  followers.push({\n    json: {\n      username: p.username,\n      full_name: p.full_name || '',\n      is_verified: p.is_verified || false,\n      seed_account: seedUsername,\n      seed_type: seedType\n    }\n  });\n}\n\nreturn followers.length > 0 ? followers.slice(0, 5) : [{ json: { _skip: true } }];"
+      },
+      "id": "code-filter",
+      "name": "Filter Public Accounts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2340, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond-has-username",
+              "leftValue": "={{ $json.username }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-followers",
+      "name": "Has Public Followers?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2560, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all follower usernames into a single item for one API call\nconst usernames = $input.all().map(i => i.json.username).filter(u => u);\nreturn [{ json: { usernames } }];"
+      },
+      "id": "aggregate-usernames",
+      "name": "Aggregate Usernames",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2780, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.apify.com/v2/acts/apify~instagram-profile-scraper/runs?token={{ $env.APIFY_TOKEN }}&waitForFinish=300",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"usernames\": {{ JSON.stringify($json.usernames) }}\n}",
+        "options": {
+          "timeout": 360000
+        }
+      },
+      "id": "apify-profiles",
+      "name": "Scrape Profiles (Apify)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3000, 200],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.apify.com/v2/datasets/{{ $json.data.defaultDatasetId }}/items?token={{ $env.APIFY_TOKEN }}&format=json",
+        "options": {}
+      },
+      "parameters": {
+        "jsCode": "// Check if the profile scraper returned a valid result\nconst result = $json;\nif (!result || !result.data || !result.data.defaultDatasetId) {\n  return [{ json: { _skip: true, _error: 'No dataset returned from profile scraper' } }];\n}\nif (result.data.status === 'FAILED' || result.data.status === 'ABORTED') {\n  return [{ json: { _skip: true, _error: `Profile scraper ${result.data.status}` } }];\n}\nreturn [{ json: { datasetId: result.data.defaultDatasetId, _skip: false } }];"
+      },
+      "id": "check-profile-result",
+      "name": "Check Profile Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3220, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond-has-profile-dataset",
+              "leftValue": "={{ $json._skip }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "false" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-valid-profile-scrape",
+      "name": "Valid Profile Scrape?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3440, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fetch profile dataset - always return at least one item so flow never dies\nconst datasetId = $json.datasetId;\nconst token = '{{ $env.APIFY_TOKEN }}';\n\ntry {\n  const response = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&format=json`);\n  if (!response.ok) {\n    return [{ json: { _empty: true, _error: `Dataset fetch failed: ${response.status}` } }];\n  }\n  const data = await response.json();\n  if (!Array.isArray(data) || data.length === 0) {\n    return [{ json: { _empty: true, _error: 'Empty dataset - no profiles returned' } }];\n  }\n  // Ensure each item is a proper object for n8n\n  return data.map(item => ({ json: typeof item === 'object' && item !== null && !Array.isArray(item) ? item : { _raw: item } }));\n} catch (e) {\n  return [{ json: { _empty: true, _error: `Fetch error: ${e.message}` } }];\n}"
+      },
+      "id": "get-profile-data",
+      "name": "Get Profile Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3660, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enrich with profile details from apify/instagram-profile-scraper\n// Build a lookup map from Filter Public Accounts to get seed info per username\nconst seedLookup = {};\ntry {\n  const filterItems = $('Filter Public Accounts').all();\n  for (const fi of filterItems) {\n    if (fi.json.username) {\n      seedLookup[fi.json.username.toLowerCase()] = {\n        seed_account: fi.json.seed_account || 'unknown',\n        seed_type: fi.json.seed_type || 'unknown'\n      };\n    }\n  }\n} catch (e) {\n  try {\n    const seedItem = $('Process Seeds').first();\n    seedLookup['_default'] = {\n      seed_account: seedItem.json.username || 'unknown',\n      seed_type: seedItem.json.seed_type || 'unknown'\n    };\n  } catch (e2) {\n    seedLookup['_default'] = { seed_account: 'unknown', seed_type: 'unknown' };\n  }\n}\n\nconst defaultSeed = seedLookup['_default'] || Object.values(seedLookup)[0] || { seed_account: 'unknown', seed_type: 'unknown' };\nconst enriched = [];\n\nfor (const item of $input.all()) {\n  const p = item.json;\n  if (!p.username) continue;\n\n  const seed = seedLookup[p.username.toLowerCase()] || defaultSeed;\n\n  // Extract comprehensive data from recent posts\n  let recentCaptions = '';\n  let hashtags = '';\n  let postUrls = '';\n  let postLikes = '';\n  let postComments = '';\n  let postDates = '';\n  let postLocations = '';\n  let postTypes = '';\n  let allMentions = new Set();\n  let totalLikes = 0;\n  let totalComments = 0;\n  let postCount = 0;\n  let imageUrlsList = [];\n  let videoUrlsList = [];\n\n  if (p.latestPosts && Array.isArray(p.latestPosts)) {\n    const posts = p.latestPosts;\n    const captions = [];\n    const urls = [];\n    const likes = [];\n    const comments = [];\n    const dates = [];\n    const locations = [];\n    const types = [];\n\n    for (const post of posts) {\n      const caption = (post.caption || '').substring(0, 300);\n      if (caption) captions.push(caption);\n      urls.push(post.url || post.shortCode ? `https://instagram.com/p/${post.shortCode}` : '');\n      likes.push(post.likesCount || 0);\n      comments.push(post.commentsCount || 0);\n      totalLikes += (post.likesCount || 0);\n      totalComments += (post.commentsCount || 0);\n      postCount++;\n      dates.push(post.timestamp ? new Date(post.timestamp).toISOString().split('T')[0] : (post.takenAtTimestamp ? new Date(post.takenAtTimestamp * 1000).toISOString().split('T')[0] : ''));\n      locations.push(post.locationName || post.location?.name || '');\n      const postType = post.type || (post.isVideo ? 'video' : (post.childPosts ? 'carousel' : 'image'));\n      types.push(postType);\n\n      // Extract media URLs - separate images and videos\n      if (post.videoUrl) {\n        videoUrlsList.push(post.videoUrl);\n      } else if (post.displayUrl) {\n        imageUrlsList.push(post.displayUrl);\n      } else if (post.imageUrl) {\n        imageUrlsList.push(post.imageUrl);\n      }\n      // For carousel posts, grab ALL child media\n      if (post.childPosts && Array.isArray(post.childPosts)) {\n        for (const child of post.childPosts) {\n          if (child.videoUrl) videoUrlsList.push(child.videoUrl);\n          else if (child.displayUrl) imageUrlsList.push(child.displayUrl);\n          else if (child.imageUrl) imageUrlsList.push(child.imageUrl);\n        }\n      }\n      // Also check sidecarItems (alternate carousel key)\n      if (post.sidecarItems && Array.isArray(post.sidecarItems)) {\n        for (const side of post.sidecarItems) {\n          if (side.videoUrl) videoUrlsList.push(side.videoUrl);\n          else if (side.displayUrl) imageUrlsList.push(side.displayUrl);\n        }\n      }\n\n      // Extract @mentions from caption\n      const mentionMatches = (post.caption || '').match(/@[\\w.]+/g) || [];\n      mentionMatches.forEach(m => allMentions.add(m));\n    }\n\n    recentCaptions = captions.join(' | ');\n    const allText = captions.join(' ');\n    const hashMatches = allText.match(/#[\\w]+/g) || [];\n    hashtags = [...new Set(hashMatches)].join(', ');\n    postUrls = urls.filter(u => u).join(', ');\n    postLikes = likes.join(', ');\n    postComments = comments.join(', ');\n    postDates = dates.filter(d => d).join(', ');\n    postLocations = [...new Set(locations.filter(l => l))].join(', ');\n    postTypes = types.join(', ');\n  }\n\n  // Calculate engagement rate\n  const followers = p.followersCount || 0;\n  let engagementRate = 0;\n  if (followers > 0 && postCount > 0) {\n    engagementRate = Math.round(((totalLikes + totalComments) / postCount / followers) * 10000) / 100;\n  }\n\n  // Extract contact info from bio\n  const bio = p.biography || '';\n  const emailMatch = bio.match(/[\\w.+-]+@[\\w-]+\\.[\\w.]+/g);\n  const phoneMatch = bio.match(/(?:\\+?\\d{1,3}[-.\\s]?)?\\(?\\d{2,4}\\)?[-.\\s]?\\d{3,4}[-.\\s]?\\d{3,4}/g);\n  const emailInBio = emailMatch ? emailMatch[0] : '';\n  const phoneInBio = phoneMatch ? phoneMatch[0] : '';\n\n  enriched.push({\n    json: {\n      username: p.username,\n      platform: 'instagram',\n      full_name: p.fullName || '',\n      bio: bio.substring(0, 500),\n      follower_count: followers,\n      following_count: p.followsCount || 0,\n      post_count: p.postsCount || 0,\n      is_verified: p.verified || false,\n      is_business: p.isBusinessAccount || false,\n      business_category: p.businessCategoryName || p.categoryName || '',\n      external_url: p.externalUrl || '',\n      profile_pic_url: p.profilePicUrl || p.profilePicUrlHD || '',\n      email_in_bio: emailInBio,\n      phone_in_bio: phoneInBio,\n      engagement_rate: engagementRate + '%',\n      recent_captions: recentCaptions.substring(0, 2000),\n      hashtags: hashtags.substring(0, 500),\n      mentions: [...allMentions].join(', ').substring(0, 500),\n      recent_post_urls: postUrls.substring(0, 1500),\n      recent_post_likes: postLikes,\n      recent_post_comments: postComments,\n      recent_post_dates: postDates,\n      recent_post_locations: postLocations.substring(0, 500),\n      recent_post_types: postTypes,\n      image_urls: imageUrlsList.join(', '),\n      video_urls: videoUrlsList.join(', '),\n      avg_likes: postCount > 0 ? Math.round(totalLikes / postCount) : 0,\n      avg_comments: postCount > 0 ? Math.round(totalComments / postCount) : 0,\n      scrape_date: new Date().toISOString().split('T')[0],\n      seed_account: seed.seed_account,\n      seed_type: seed.seed_type,\n      profile_url: p.url || `https://instagram.com/${p.username}`\n    }\n  });\n}\n\nreturn enriched.length > 0 ? enriched : [{ json: { _empty: true } }];"
+      },
+      "id": "code-enrich",
+      "name": "Enrich Profile Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3880, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond-has-username",
+              "leftValue": "={{ $json.username }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-profiles",
+      "name": "Has Enriched Data?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [4100, 200]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "byName",
+          "value": "Profiles"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "username": "={{ $json.username }}",
+            "platform": "={{ $json.platform }}",
+            "full_name": "={{ $json.full_name }}",
+            "bio": "={{ $json.bio }}",
+            "follower_count": "={{ $json.follower_count }}",
+            "following_count": "={{ $json.following_count }}",
+            "post_count": "={{ $json.post_count }}",
+            "is_verified": "={{ $json.is_verified }}",
+            "is_business": "={{ $json.is_business }}",
+            "business_category": "={{ $json.business_category }}",
+            "external_url": "={{ $json.external_url }}",
+            "profile_pic_url": "={{ $json.profile_pic_url }}",
+            "email_in_bio": "={{ $json.email_in_bio }}",
+            "phone_in_bio": "={{ $json.phone_in_bio }}",
+            "engagement_rate": "={{ $json.engagement_rate }}",
+            "avg_likes": "={{ $json.avg_likes }}",
+            "avg_comments": "={{ $json.avg_comments }}",
+            "recent_captions": "={{ $json.recent_captions }}",
+            "hashtags": "={{ $json.hashtags }}",
+            "mentions": "={{ $json.mentions }}",
+            "recent_post_urls": "={{ $json.recent_post_urls }}",
+            "recent_post_likes": "={{ $json.recent_post_likes }}",
+            "recent_post_comments": "={{ $json.recent_post_comments }}",
+            "recent_post_dates": "={{ $json.recent_post_dates }}",
+            "recent_post_locations": "={{ $json.recent_post_locations }}",
+            "recent_post_types": "={{ $json.recent_post_types }}",
+            "image_urls": "={{ $json.image_urls }}",
+            "video_urls": "={{ $json.video_urls }}",
+            "scrape_date": "={{ $json.scrape_date }}",
+            "seed_account": "={{ $json.seed_account }}",
+            "seed_type": "={{ $json.seed_type }}",
+            "profile_url": "={{ $json.profile_url }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-append",
+      "name": "Append to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [4320, 100],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all items into one so only a single signal loops back to Process Seeds\nreturn [{ json: { _done: true, profiles_written: $input.all().length } }];"
+      },
+      "id": "aggregate-done",
+      "name": "Aggregate Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4540, 100]
+    },
+    {
+      "parameters": {},
+      "id": "noop-next-seed",
+      "name": "Next Seed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [4760, 340]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Read Seed Accounts", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Seed Accounts": {
+      "main": [
+        [{ "node": "Flatten & Extract Usernames", "type": "main", "index": 0 }]
+      ]
+    },
+    "Flatten & Extract Usernames": {
+      "main": [
+        [{ "node": "Process Seeds", "type": "main", "index": 0 }]
+      ]
+    },
+    "Process Seeds": {
+      "main": [
+        [{ "node": "Scrape Followers (Apify)", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Scrape Followers (Apify)": {
+      "main": [
+        [{ "node": "Check Follower Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Follower Result": {
+      "main": [
+        [{ "node": "Valid Scrape?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Valid Scrape?": {
+      "main": [
+        [{ "node": "Get Follower List", "type": "main", "index": 0 }],
+        [{ "node": "Next Seed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Follower List": {
+      "main": [
+        [{ "node": "Filter Public Accounts", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filter Public Accounts": {
+      "main": [
+        [{ "node": "Has Public Followers?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Public Followers?": {
+      "main": [
+        [{ "node": "Aggregate Usernames", "type": "main", "index": 0 }],
+        [{ "node": "Next Seed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aggregate Usernames": {
+      "main": [
+        [{ "node": "Scrape Profiles (Apify)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Scrape Profiles (Apify)": {
+      "main": [
+        [{ "node": "Check Profile Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Profile Result": {
+      "main": [
+        [{ "node": "Valid Profile Scrape?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Valid Profile Scrape?": {
+      "main": [
+        [{ "node": "Get Profile Data", "type": "main", "index": 0 }],
+        [{ "node": "Next Seed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Profile Data": {
+      "main": [
+        [{ "node": "Enrich Profile Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Enrich Profile Data": {
+      "main": [
+        [{ "node": "Has Enriched Data?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Enriched Data?": {
+      "main": [
+        [{ "node": "Append to Google Sheets", "type": "main", "index": 0 }],
+        [{ "node": "Next Seed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Append to Google Sheets": {
+      "main": [
+        [{ "node": "Aggregate Done", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aggregate Done": {
+      "main": [
+        [{ "node": "Next Seed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Next Seed": {
+      "main": [
+        [{ "node": "Process Seeds", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "luxury-watches" },
+    { "name": "lead-gen" },
+    { "name": "milestone-1" }
+  ]
+}

@@ -1,0 +1,9 @@
+Hey Moment, here's the plan:
+
+Your 127 seed accounts → we scrape their followers → grab profile details (bio, posts, hashtags) → AI classifies each one as collector/dealer/noise → tags which watch brands they're into + priority score → all goes into Google Sheets
+
+I've already started building. The scraping pipeline is done, just need your Apify API token to run the first test batch.
+
+Can you send me the token? It's in your Apify account under Settings > Integrations.
+
+Once I have that, I'll run a small test (50-100 profiles) so you can see the output and we fine tune before scaling up.
