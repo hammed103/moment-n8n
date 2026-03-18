@@ -9,4 +9,5 @@ ENV GENERIC_TIMEZONE=America/New_York
 ENV QUEUE_HEALTH_CHECK_ACTIVE=true
 
 # Write Google credentials from env var at startup
-CMD sh -c 'echo "$GOOGLE_CREDENTIALS_JSON" > /home/node/google-credentials.json && n8n start'
+COPY entrypoint.sh /home/node/entrypoint.sh
+ENTRYPOINT ["tini", "--", "/home/node/entrypoint.sh"]
