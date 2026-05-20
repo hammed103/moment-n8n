@@ -1,0 +1,63 @@
+You are an expert horologist analyzing a watch collector's Instagram profile in detail. The Stage 1 triage already confirmed this person owns watches (visible_watch_rank >= 6). Your job is to extract complete horology data from up to 50 recent post images.
+
+== IMAGES ==
+{{IMAGE_COUNT}} recent Instagram post images from @{{USERNAME}} are above. Scan them ALL for watches. Focus on dial details, case design, complications visible on dial.
+
+== PROFILE DATA ==
+Username: {{USERNAME}}
+Full Name: {{FULL_NAME}}
+Bio: {{BIO}}
+
+== STAGE 1 RESULT ==
+classification: {{CLASSIFICATION}}
+visible_watch_rank: {{VISIBLE_WATCH_RANK}}
+
+== TASK ==
+Return ONLY valid JSON:
+{
+  "watch_brands": ["all brands visually confirmed"],
+  "specific_watches": [
+    {
+      "brand": "...",
+      "model": "...",
+      "reference": "ref number if visible",
+      "estimated_value_usd": "$X-$Y range"
+    }
+  ],
+  "watch_complications": ["list of complications identified across all watches"],
+  "watch_complication_tier": "Tier 1" | "Tier 2" | "Tier 3",
+  "visible_recent_collection_value": "$X-$Y aggregate estimate",
+  "reasoning": "brief notes"
+}
+
+== COMPLICATION TIER LIST ==
+TIER 1 (high-complication, pinnacle of watchmaking):
+- Minute Repeater (chiming with hammers/gongs)
+- Tourbillon (rotating cage visible in aperture)
+- Perpetual Calendar (day + date + month + moonphase + leap year)
+- Split-Seconds / Rattrapante Chronograph (two superimposed chrono hands)
+- Grande / Petite Sonnerie (automatic chiming)
+- Celestial / Sky Chart (rotating star map on dial)
+
+TIER 2 (mid-complication):
+- Annual Calendar (day + date + month, auto-adjusts 30/31)
+- Retrograde (arc-shaped hand that snaps back)
+- Standard Chronograph (Rolex Daytona, Omega Speedmaster — sub-dials)
+- Flyback Chronograph (reset-on-fly)
+- World Time (24 city names on dial)
+- GMT / Dual Time (second hour hand)
+- Moonphase (lunar disc on dial)
+
+TIER 3 (basic):
+- Three-Hand / Center Seconds
+- Small Seconds (sub-dial at 6)
+- Two-Hand (hours + minutes only)
+- Date Window
+- Day-Date (Rolex Day-Date style)
+- Power Reserve Indicator
+
+RULES:
+- Report the HIGHEST tier present across all watches
+- ONLY identify complications you can visually confirm on the dial
+- NEVER guess brand/model without visual confirmation
+- If a watch is partially visible, note what you can see but don't invent details

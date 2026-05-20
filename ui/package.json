@@ -1,0 +1,12 @@
+{
+  "name": "moment-classifier-ui",
+  "version": "1.0.0",
+  "description": "Luxury Watch Lead Gen - Classifier Testing UI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
