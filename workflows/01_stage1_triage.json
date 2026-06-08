@@ -1,0 +1,138 @@
+{
+  "name": "Stage 1 — Triage + Router",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Sheet1",
+          "cachedResultName": "Sheet1"
+        },
+        "options": {}
+      },
+      "id": "read-seeds",
+      "name": "Read Seeds",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 300],
+      "credentials": {
+        "googleApi": {
+          "id": "0kIjsxY1xNUQys1T",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flatten seeds list, normalize usernames\nconst seeds = [];\nconst seen = new Set();\nfor (const item of $input.all()) {\n  const u = (item.json.username || '').trim().toLowerCase();\n  if (!u || seen.has(u)) continue;\n  seen.add(u);\n  seeds.push({ json: { username: u, seed_type: item.json.seed_type || 'manual' } });\n}\nreturn seeds;"
+      },
+      "id": "normalize-seeds",
+      "name": "Normalize Seeds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-seeds",
+      "name": "Process Each Seed",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.apify.com/v2/acts/datadoping~instagram-followers-scraper/runs?token={{ $env.APIFY_TOKEN }}&waitForFinish=300",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"usernames\": [\"{{ $json.username }}\"],\n  \"max_count\": 50\n}",
+        "options": { "timeout": 360000 }
+      },
+      "id": "scrape-followers",
+      "name": "Scrape Followers (Apify)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.apify.com/v2/datasets/{{ $json.data.defaultDatasetId }}/items?token={{ $env.APIFY_TOKEN }}&format=json",
+        "options": { "timeout": 60000 }
+      },
+      "id": "fetch-dataset",
+      "name": "Fetch Followers Dataset",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter out private accounts and replica keywords\nconst replicaRx = /\\b(replica|1:1|superclone|super\\s*clone|aaa\\s*quality|clone|factory\\s*direct|fake|counterfeit|rep\\s*watch|reptime|dhgate|mirror\\s*quality)\\b/i;\nconst seedUsername = $('Process Each Seed').item.json.username;\nconst seedType = $('Process Each Seed').item.json.seed_type;\nconst out = [];\nfor (const item of $input.all()) {\n  const p = item.json;\n  if (!p.username || p.is_private) continue;\n  if (replicaRx.test(p.biography || '')) continue;\n  out.push({ json: { username: p.username, seed_account: seedUsername, seed_type: seedType } });\n}\nreturn out;"
+      },
+      "id": "filter-followers",
+      "name": "Filter Public + Non-Replica",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://207.180.208.209:3456/api/stage1-classify",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"username\": \"{{ $json.username }}\",\n  \"seed_account\": \"{{ $json.seed_account }}\",\n  \"seed_type\": \"{{ $json.seed_type }}\"\n}",
+        "options": { "timeout": 180000 }
+      },
+      "id": "call-stage1",
+      "name": "Stage 1 Classify (UI API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Stage 1 server already wrote to Sheet A/B/C — just log the routing\nreturn $input.all().map(item => ({\n  json: {\n    username: item.json.username || $('Filter Public + Non-Replica').item.json.username,\n    routed_to: item.json.routed_to || 'unknown',\n    classification: item.json.classification?.classification || '',\n    visible_watch_rank: item.json.classification?.visible_watch_rank || 0,\n    priority_score: item.json.classification?.priority_score || 0\n  }\n}));"
+      },
+      "id": "log-result",
+      "name": "Log Routing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": { "main": [[{ "node": "Read Seeds", "type": "main", "index": 0 }]] },
+    "Read Seeds": { "main": [[{ "node": "Normalize Seeds", "type": "main", "index": 0 }]] },
+    "Normalize Seeds": { "main": [[{ "node": "Process Each Seed", "type": "main", "index": 0 }]] },
+    "Process Each Seed": { "main": [[{ "node": "Scrape Followers (Apify)", "type": "main", "index": 0 }]] },
+    "Scrape Followers (Apify)": { "main": [[{ "node": "Fetch Followers Dataset", "type": "main", "index": 0 }]] },
+    "Fetch Followers Dataset": { "main": [[{ "node": "Filter Public + Non-Replica", "type": "main", "index": 0 }]] },
+    "Filter Public + Non-Replica": { "main": [[{ "node": "Stage 1 Classify (UI API)", "type": "main", "index": 0 }]] },
+    "Stage 1 Classify (UI API)": { "main": [[{ "node": "Log Routing", "type": "main", "index": 0 }]] },
+    "Log Routing": { "main": [[{ "node": "Process Each Seed", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

@@ -1,16 +1,31 @@
-# Service account keys - DO NOT commit
-peak-lattice-398418-eeb02e45c896.json
-*.json.bak
+# Secrets / credentials
+*.env
+.env*
+google-creds.json
+peak-lattice-*.json
 
-# Environment
-.env
+# Private chat exports
+_chat.txt
+*.chat.txt
 
-# n8n data
-.n8n/
+# Local notes / planning artifacts
+architecture.txt
+doc.txt
+create_summary.js
 
-# Chat logs with secrets
-more_chat.txt
-chat.txt
+# Spec PDFs (Jason's source docs — too large for repo)
+*.pdf
+workflow*.jpeg
+workflow*.png
 
-# OS files
+# Test scratch
+test_*.py
+test_*.ipynb
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS
 .DS_Store
+Thumbs.db

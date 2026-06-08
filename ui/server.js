@@ -8,20 +8,31 @@ const crypto = require("crypto");
 const app = express();
 const PORT = process.env.PORT || 3456;
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "REDACTED_GEMINI_KEY";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+if (!GEMINI_API_KEY) console.warn("[warn] GEMINI_API_KEY not set — set the env var before classification calls.");
 const PROMPT_FILE = path.join(__dirname, "prompt_stage1.txt");
 const PROMPT_FILE_LEGACY = path.join(__dirname, "prompt.txt"); // kept for fallback / Phase 2 deep-dive
-const SHEET_A = "Sheet A - Collectors_Dealers";
-const SHEET_A_DD = "Sheet A - Deep Dive";
-const SHEET_B = "Sheet B - Watchless UHNI";
-const SHEET_B_DD = "Sheet B - Deep Dive";
-const SHEET_C = "Sheet C - Low Rank";
+// Stage 1 triage sheets (routing destinations)
+const SHEET_A = "1. Triage - Collectors & Dealers";
+const SHEET_B = "2. Triage - Watchless UHNI";
+const SHEET_C = "3. Triage - Low Rank";
+// Stage 2 deep-dive sheets (one per dataset, independent)
+const SHEET_HOROLOGY = "4. Horology Data";
+const SHEET_WEALTH = "5. Wealth Data";
+const SHEET_LIFESTYLE = "6. Lifestyle Data";
+// CREDS lookup order (first hit wins):
+//   1. GOOGLE_CREDENTIALS_JSON env var (Railway/Docker style)
+//   2. /opt/moment-ui/google-creds.json (production VPS path)
+//   3. ../peak-lattice-398418-eeb02e45c896.json (local dev fallback)
 const CREDS = process.env.GOOGLE_CREDENTIALS_JSON
   ? JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON)
-  : (() => { try { return require(path.join(__dirname, "..", "peak-lattice-398418-eeb02e45c896.json")); } catch { return null; } })();
+  : (() => { try { return require("/opt/moment-ui/google-creds.json"); } catch {} ;
+              try { return require(path.join(__dirname, "..", "peak-lattice-398418-eeb02e45c896.json")); } catch {} ;
+              return null; })();
 const SHEET_ID = process.env.SHEET_ID || "15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84";
 const SEEDS_SHEET = "Sheet1";
-const APIFY_TOKEN = process.env.APIFY_TOKEN || "REDACTED_APIFY_KEY";
+const APIFY_TOKEN = process.env.APIFY_TOKEN || "";
+if (!APIFY_TOKEN) console.warn("[warn] APIFY_TOKEN not set — Instagram scrapes will fail until it is.");
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -77,6 +88,7 @@ app.get("/api/instagram/:username", async (req, res) => {
         post_count: user.edge_owner_to_timeline_media?.count || 0,
         is_verified: user.is_verified || false,
         is_business: user.is_business_account || false,
+        is_private: user.is_private || false,
         business_category: user.category_name || "",
         external_url: user.external_url || "",
         profile_pic: user.profile_pic_url_hd || "",
@@ -153,6 +165,7 @@ app.get("/api/instagram/:username", async (req, res) => {
       post_count: p.postsCount || 0,
       is_verified: p.verified || false,
       is_business: p.isBusinessAccount || false,
+      is_private: p.private || p.isPrivate || false,
       business_category: p.businessCategoryName || p.categoryName || "",
       external_url: p.externalUrl || "",
       profile_pic: p.profilePicUrlHD || p.profilePicUrl || "",
@@ -251,7 +264,7 @@ app.post("/api/classify", async (req, res) => {
 // --- API: Stage 1 Classify (n8n entrypoint, just takes username) ---
 // Body: { username, seed_account, seed_type }
 app.post("/api/stage1-classify", async (req, res) => {
-  const { username, seed_account, seed_type } = req.body;
+  const { username, seed_account } = req.body;
   if (!username) return res.status(400).json({ error: "username required" });
 
   try {
@@ -259,12 +272,22 @@ app.post("/api/stage1-classify", async (req, res) => {
     const profile = await fetchProfileInternal(username, 10);
     if (!profile || profile.error) return res.status(404).json({ error: "Profile fetch failed" });
 
-    // Inject seed info if provided
+    // Inject seed account if provided (kept for provenance only)
     if (seed_account) profile.seed_account = seed_account;
-    if (seed_type) profile.seed_type = seed_type;
 
-    // 2. Download up to 10 images (Stage 1)
+    // Private accounts: if we got nothing usable, refuse rather than silently classify on bio alone.
+    // Apify sometimes returns cached posts for private accounts that were public when last crawled,
+    // so we only hard-skip when there are NO images to look at.
     const imageUrls = (profile.image_urls || []).slice(0, 10);
+    if (profile.is_private && imageUrls.length === 0) {
+      return res.status(200).json({
+        username,
+        skipped: true,
+        reason: "private_no_images",
+        is_private: true,
+        message: "Account is private and no posts were accessible — Stage 1 skipped."
+      });
+    }
     const parts = [];
     let downloaded = 0;
     for (const url of imageUrls) {
@@ -391,11 +414,10 @@ app.post("/api/deep-dive", async (req, res) => {
       // Sheet B always allowed (need to confirm UHNWI)
     }
     if (kind === "lifestyle") {
-      // visible_wealth_tier lives in Sheet A - Deep Dive (Sheet A path) or Sheet B - Deep Dive (Sheet B path)
+      // visible_wealth_tier now lives in the dedicated Wealth Data sheet (written by the Wealth deep dive)
       let lookupVWT = existingVWT;
-      const ddSheet = sourceSheet === SHEET_A ? SHEET_A_DD : SHEET_B_DD;
       try {
-        const ddData = await sheetsGet(token, `${ddSheet}!A1:AZ10000`);
+        const ddData = await sheetsGet(token, `${SHEET_WEALTH}!A1:AZ10000`);
         const ddRows = ddData.values || [];
         if (ddRows.length > 1) {
           const ddH = ddRows[0];
@@ -469,43 +491,27 @@ app.post("/api/deep-dive", async (req, res) => {
       updates.vision_summary = (deepData.vision_summary || "").slice(0, 800);
     }
 
-    // 7. Write deep dive results:
-    //    - Sheet A profiles: write to Sheet A - Deep Dive
-    //    - Sheet B profiles: write to Sheet B - Deep Dive (separate from Stage 1)
-    let targetSheet;
-    if (sourceSheet === SHEET_A) {
-      targetSheet = SHEET_A_DD;
-    } else {
-      targetSheet = SHEET_B_DD;
-    }
-    const merged = { ...stage1Row, ...updates };
-    delete merged._rowNum;
+    // 7. Write deep dive results to the dedicated sheet for this kind:
+    //    horology → Sheet 4, wealth → Sheet 5, lifestyle → Sheet 6
+    const targetSheet = kind === "horology" ? SHEET_HOROLOGY
+                      : kind === "wealth" ? SHEET_WEALTH
+                      : SHEET_LIFESTYLE;
+    // Identity columns carried into every deep-dive sheet
+    const identity = {
+      username,
+      full_name: stage1Row.full_name || "",
+      classification: stage1Row.classification || "",
+      profile_url: stage1Row.profile_url || `https://instagram.com/${username}`,
+      visible_watch_rank: stage1Row.visible_watch_rank || "",
+    };
+    const merged = { ...identity, ...updates };
     await writeRowByHeaders(token, targetSheet, username, merged);
 
-    // 8. POST-WEALTH UHNWI DOWNGRADE CHECK (per PDF spec)
-    //    If profile is in Sheet B and Wealth deep dive shows it's NOT Ultra-High in both tiers,
-    //    move the row to Sheet C (since the UHNWI gate failed).
-    let downgraded = false;
-    if (kind === "wealth" && sourceSheet === SHEET_B) {
-      const newVWT = (updates.visible_wealth_tier || "").toLowerCase();
-      const newNWT = (updates.net_worth_tier || stage1NWT || "").toLowerCase();
-      const passesUhnwi = newVWT === "ultra-high" && newNWT === "ultra-high";
-      if (!passesUhnwi) {
-        // Move row: add to Sheet C, delete from Sheet B (Stage 1) and Sheet B - Deep Dive (Stage 2)
-        const merged_c = { ...stage1Row, ...updates };
-        delete merged_c._rowNum;
-        await writeRowByHeaders(token, SHEET_C, username, merged_c);
-        await deleteSheetRow(token, SHEET_B, stage1Row._rowNum);
-        // Also remove from Sheet B - Deep Dive if present
-        try {
-          const ddData = await sheetsGet(token, `${SHEET_B_DD}!A:A`);
-          const ddNames = (ddData.values || []).flat();
-          const ddIdx = ddNames.findIndex(u => (u || "").toLowerCase() === username.toLowerCase());
-          if (ddIdx > 0) await deleteSheetRow(token, SHEET_B_DD, ddIdx + 1);
-        } catch (e) {}
-        downgraded = true;
-      }
-    }
+    // 8. (No auto-downgrade.) Watchless UHNI rows stay in Sheet B once routed there.
+    //    The Lifestyle workflow still enforces its own UHNWI gate (Ultra-High in both tiers).
+    //    If the Wealth deep dive returns "High" instead of "Ultra-High", that's fine — the row
+    //    stays in Watchless UHNI for follow-up.
+    const downgraded = false;
 
     res.json({ kind, username, source_sheet: sourceSheet, written_to: targetSheet, updates, deep_data: deepData, images_analyzed: downloaded, downgraded });
   } catch (err) {
@@ -650,19 +656,18 @@ async function writeClassificationToSheets(profile, classification) {
   const wealthStr = Array.isArray(classification.wealth_signals) ? classification.wealth_signals.join(", ") : String(classification.wealth_signals || "");
   const complicationsStr = Array.isArray(classification.watch_complications) ? classification.watch_complications.join(", ") : String(classification.watch_complications || "");
 
-  // Seed info passed in from request payload (n8n provides it from Stage 1 scrape)
-  // Falls back to defaults for manual UI testing
+  // Seed account (kept for provenance). seed_type is intentionally removed —
+  // the classification column already captures what the AI thinks the account is.
   const seedAccount = profile.seed_account || "";
-  const seedType = profile.seed_type || "ui_test";
 
   // Try to extract email/phone from bio
   const bio = (profile.bio || "");
   const emailMatch = bio.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
   const phoneMatch = bio.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}/);
 
-  // Build data map — Stage 1 fields (used by Sheet A/B/C)
+  // Build data map — Stage 1 triage fields + PRELIMINARY watch/wealth data (from 10 images)
   const clData = {
-    // Stage 1 core fields (Jason's spec)
+    // Core triage fields
     username,
     full_name: profile.full_name || "",
     classification: classification.classification || "unknown",
@@ -673,35 +678,32 @@ async function writeClassificationToSheets(profile, classification) {
     profile_url: `https://instagram.com/${username}`,
     follower_count: profile.follower_count || 0,
     post_count: profile.post_count || 0,
-    is_verified: profile.is_verified || false,
-    is_business: profile.is_business || false,
+    is_verified: profile.is_verified ? "Yes" : "No",
+    is_business: profile.is_business ? "Yes" : "No",
+    is_private: profile.is_private ? "Yes" : "No",
     business_category: profile.business_category || "",
     bio: bio.slice(0, 500),
     email_in_bio: emailMatch ? emailMatch[0] : "",
     phone_in_bio: phoneMatch ? phoneMatch[0] : "",
     external_url: profile.external_url || "",
     seed_account: seedAccount,
-    seed_type: seedType,
     scrape_date: today,
 
-    // Stage 2 fields — populated only when deep dive workflow runs
-    watch_brands: "",
-    specific_watches: "",
-    watch_complications: "",
-    watch_complication_tier: "",
-    visible_recent_collection_value: "",
-    visible_wealth_tier: "",
-    profession: "",
-    business_sector: "",
-    wealth_signals: "",
-    approach_suggestion: "",
-    inferred_lifestyle_value: "",
-    hobbies: "",
-    locations: "",
-    dining_preferences: "",
+    // PRELIMINARY data captured from the 10 triage images (refined later by Deep Dive)
+    watch_brands: brandsStr,
+    specific_watches: watchStr,
+    visible_recent_collection_value: classification.visible_recent_collection_value || "",
+    visible_wealth_tier: classification.visible_wealth_tier || "",
+    profession: classification.profession || "",
+    business_sector: classification.business_sector || "",
+    wealth_signals: wealthStr,
     ai_reasoning: (classification.reasoning || "").slice(0, 500),
-    vision_summary: "",
-    deep_dive_date: "",
+    vision_summary: (classification.vision_summary || "").slice(0, 800),
+    // NOTE: deep-dive-only fields (watch_complications, watch_complication_tier,
+    // approach_suggestion, inferred_lifestyle_value, hobbies, locations,
+    // dining_preferences, deep_dive_date) are intentionally NOT in this map.
+    // writeRowByHeaders only writes columns that exist in the target sheet's headers,
+    // so excluding them here keeps triage sheets from accidentally growing those columns.
   };
 
   // --- Stage 1 Routing: Sheet A / B / C ---
@@ -724,10 +726,15 @@ function routeStage1(classification, visibleWatchRank, netWorthTier) {
   if (classification === "replica_dealer" || classification === "irrelevant") {
     return SHEET_C;
   }
+  // Sheet A = Collectors/Dealers with visible_watch_rank >= 6 (focus is on the watches)
   if ((classification === "collector" || classification === "dealer") && visibleWatchRank >= 6) {
     return SHEET_A;
   }
-  if (classification === "hnw_no_watches" && netWorthTier === "ultra-high") {
+  // Sheet B = Watchless UHNI / High-value prospects. Catches:
+  //   - hnw_no_watches (AI explicitly tagged as wealthy with no watch focus)
+  //   - ANY ultra-high net worth profile that didn't qualify for Sheet A
+  //     (e.g. a collector with rank 5 but ultra-high wealth — the wealth is what matters)
+  if (classification === "hnw_no_watches" || netWorthTier === "ultra-high") {
     return SHEET_B;
   }
   return SHEET_C;

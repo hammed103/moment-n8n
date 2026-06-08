@@ -22,10 +22,20 @@ Return ONLY valid JSON with these fields:
   "visible_watch_rank": 0-10,
   "net_worth_tier": "ultra-high" | "high" | "medium" | "low" | "unknown",
   "confidence": "high" | "medium" | "low",
-  "reasoning": "1-2 sentence rationale"
+  "watch_brands": ["brands visually confirmed in the 10 images"],
+  "specific_watches": [ { "brand": "...", "model": "...", "reference": "ref if visible", "estimated_value_usd": "$X-$Y" } ],
+  "visible_recent_collection_value": "$X-$Y total estimate of watches seen in these 10 images",
+  "visible_wealth_tier": "Ultra-High" | "High" | "Medium" | "Low",
+  "profession": "their role/job if identifiable from bio or posts, else empty",
+  "business_sector": "industry if identifiable (Real Estate / Crypto / Finance / Tech / Entertainment / Medical / Legal / Hospitality / Luxury Retail / Family Office), else empty",
+  "wealth_signals": ["specific luxury indicators seen: cars, jets, jewelry, locations, brands"],
+  "vision_summary": "2-3 sentence summary of what's visible across the 10 images",
+  "reasoning": "1-2 sentence rationale for the classification"
 }
 
-Do NOT compute or return priority_score. The server derives it from visible_watch_rank, net_worth_tier, and classification using a fixed formula. Your job is the judgment calls (rank, tier, classification) — math happens downstream.
+PRELIMINARY DATA NOTE: watch_brands, specific_watches, visible_recent_collection_value, visible_wealth_tier, profession, business_sector, wealth_signals and vision_summary are PRELIMINARY — based only on these 10 triage images. The Deep Dive (50 images) will refine them later. Capture what you can confirm now; leave fields empty/0 if not visible. Do NOT identify watch complications or complication tier here — that's deep-dive only.
+
+Do NOT compute or return priority_score. The server derives it from visible_watch_rank, net_worth_tier, and classification using a fixed formula. Your job is the judgment calls — math happens downstream.
 
 == CLASSIFICATION RULES ==
 - collector: REAL personal owner of watches. Look for wrist shots, casual lifestyle photos with watches naturally in frame, watches paired with the person's other belongings (car, watch winder, home). NOT product shots.

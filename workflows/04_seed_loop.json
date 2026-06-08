@@ -1,0 +1,206 @@
+{
+  "name": "Stage 3 — Seed Loop (Flywheel)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "1. Triage - Collectors & Dealers",
+          "cachedResultName": "1. Triage - Collectors & Dealers"
+        },
+        "options": {}
+      },
+      "id": "read-sheet-a",
+      "name": "Read Sheet A",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 200],
+      "credentials": {
+        "googleApi": {
+          "id": "0kIjsxY1xNUQys1T",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "2. Triage - Watchless UHNI",
+          "cachedResultName": "2. Triage - Watchless UHNI"
+        },
+        "options": {}
+      },
+      "id": "read-sheet-b",
+      "name": "Read Sheet B",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 400],
+      "credentials": {
+        "googleApi": {
+          "id": "0kIjsxY1xNUQys1T",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Sheet1",
+          "cachedResultName": "Sheet1"
+        },
+        "options": {}
+      },
+      "id": "read-seeds",
+      "name": "Read Existing Seeds",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 600],
+      "credentials": {
+        "googleApi": {
+          "id": "0kIjsxY1xNUQys1T",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pick verified rank 8-10 from Sheet A and all UHNI from Sheet B as new flywheel seeds\nconst existingSeeds = new Set();\nfor (const s of $('Read Existing Seeds').all()) {\n  if (s.json.username) existingSeeds.add(s.json.username.toLowerCase());\n}\n\nconst targets = [];\nfor (const item of $('Read Sheet A').all()) {\n  const rank = parseInt(item.json.visible_watch_rank) || 0;\n  if (rank < 8) continue;\n  const u = (item.json.username || '').toLowerCase();\n  if (!u || existingSeeds.has(u)) continue;\n  targets.push({ json: { username: u, seed_type: 'follower_loop', source_sheet: 'A' } });\n}\nfor (const item of $('Read Sheet B').all()) {\n  const u = (item.json.username || '').toLowerCase();\n  if (!u || existingSeeds.has(u)) continue;\n  targets.push({ json: { username: u, seed_type: 'follower_loop', source_sheet: 'B' } });\n}\nreturn targets;"
+      },
+      "id": "pick-targets",
+      "name": "Pick Verified Targets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-targets",
+      "name": "Process Each Target",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.apify.com/v2/acts/datadoping~instagram-followings-scraper/runs?token={{ $env.APIFY_TOKEN }}&waitForFinish=300",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"usernames\": [\"{{ $json.username }}\"],\n  \"max_count\": 50\n}",
+        "options": { "timeout": 360000 }
+      },
+      "id": "scrape-following",
+      "name": "Scrape THEIR Following (Apify)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.apify.com/v2/datasets/{{ $json.data.defaultDatasetId }}/items?token={{ $env.APIFY_TOKEN }}&format=json",
+        "options": { "timeout": 60000 }
+      },
+      "id": "fetch-following",
+      "name": "Fetch Following Dataset",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build new seed rows from following list, dedup against existing seeds\nconst existingSeeds = new Set();\nfor (const s of $('Read Existing Seeds').all()) {\n  if (s.json.username) existingSeeds.add(s.json.username.toLowerCase());\n}\nconst sourceTarget = $('Process Each Target').item.json.username;\nconst rows = [];\nfor (const item of $input.all()) {\n  const u = (item.json.username || '').toLowerCase();\n  if (!u || existingSeeds.has(u)) continue;\n  existingSeeds.add(u);\n  rows.push({ json: {\n    username: u,\n    seed_type: 'follower_loop',\n    original_url: `https://www.instagram.com/${u}/`,\n    source_target: sourceTarget\n  }});\n}\nreturn rows;"
+      },
+      "id": "build-new-seeds",
+      "name": "Build New Seed Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 400]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Sheet1",
+          "cachedResultName": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "username": "={{ $json.username }}",
+            "seed_type": "={{ $json.seed_type }}",
+            "original_url": "={{ $json.original_url }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "append-seeds",
+      "name": "Append to Seeds Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1780, 400],
+      "credentials": {
+        "googleApi": {
+          "id": "0kIjsxY1xNUQys1T",
+          "name": "Google Sheets account 2"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": { "main": [[{ "node": "Read Sheet A", "type": "main", "index": 0 }, { "node": "Read Sheet B", "type": "main", "index": 0 }, { "node": "Read Existing Seeds", "type": "main", "index": 0 }]] },
+    "Read Sheet A": { "main": [[{ "node": "Pick Verified Targets", "type": "main", "index": 0 }]] },
+    "Read Sheet B": { "main": [[{ "node": "Pick Verified Targets", "type": "main", "index": 0 }]] },
+    "Read Existing Seeds": { "main": [[{ "node": "Pick Verified Targets", "type": "main", "index": 0 }]] },
+    "Pick Verified Targets": { "main": [[{ "node": "Process Each Target", "type": "main", "index": 0 }]] },
+    "Process Each Target": { "main": [[{ "node": "Scrape THEIR Following (Apify)", "type": "main", "index": 0 }]] },
+    "Scrape THEIR Following (Apify)": { "main": [[{ "node": "Fetch Following Dataset", "type": "main", "index": 0 }]] },
+    "Fetch Following Dataset": { "main": [[{ "node": "Build New Seed Rows", "type": "main", "index": 0 }]] },
+    "Build New Seed Rows": { "main": [[{ "node": "Append to Seeds Sheet", "type": "main", "index": 0 }]] },
+    "Append to Seeds Sheet": { "main": [[{ "node": "Process Each Target", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

@@ -25,13 +25,15 @@ Return ONLY valid JSON:
     }
   ],
   "watch_complications": ["list of complications identified across all watches"],
-  "watch_complication_tier": "Tier 1" | "Tier 2" | "Tier 3",
+  "watch_complication_tier": "Tier A" | "Tier B" | "Tier C",
   "visible_recent_collection_value": "$X-$Y aggregate estimate",
   "reasoning": "brief notes"
 }
 
 == COMPLICATION TIER LIST ==
-TIER 1 (high-complication, pinnacle of watchmaking):
+Tiers run from A (most complicated, pinnacle of watchmaking) down to C (basic).
+
+TIER A — High-Complication (pinnacle of watchmaking):
 - Minute Repeater (chiming with hammers/gongs)
 - Tourbillon (rotating cage visible in aperture)
 - Perpetual Calendar (day + date + month + moonphase + leap year)
@@ -39,7 +41,7 @@ TIER 1 (high-complication, pinnacle of watchmaking):
 - Grande / Petite Sonnerie (automatic chiming)
 - Celestial / Sky Chart (rotating star map on dial)
 
-TIER 2 (mid-complication):
+TIER B — Mid-Complication:
 - Annual Calendar (day + date + month, auto-adjusts 30/31)
 - Retrograde (arc-shaped hand that snaps back)
 - Standard Chronograph (Rolex Daytona, Omega Speedmaster — sub-dials)
@@ -48,7 +50,7 @@ TIER 2 (mid-complication):
 - GMT / Dual Time (second hour hand)
 - Moonphase (lunar disc on dial)
 
-TIER 3 (basic):
+TIER C — Basic:
 - Three-Hand / Center Seconds
 - Small Seconds (sub-dial at 6)
 - Two-Hand (hours + minutes only)
@@ -57,7 +59,7 @@ TIER 3 (basic):
 - Power Reserve Indicator
 
 RULES:
-- Report the HIGHEST tier present across all watches
+- Report the HIGHEST tier present across all watches (A > B > C)
 - ONLY identify complications you can visually confirm on the dial
 - NEVER guess brand/model without visual confirmation
 - If a watch is partially visible, note what you can see but don't invent details

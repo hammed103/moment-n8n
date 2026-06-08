@@ -572,10 +572,10 @@
             <div class="step-num" style="background: var(--green);">A</div>
             <div class="step-title">Collectors / Dealers</div>
           </div>
-          <div class="step-subtitle">Stage 1 triage list — visible_watch_rank 6-10</div>
+          <div class="step-subtitle">"1. Triage - Collectors & Dealers" — visible_watch_rank 6-10</div>
           <div class="step-detail">
-            <strong>Sheet A (20 cols, Stage 1 only):</strong> username, full_name, classification, visible_watch_rank, net_worth_tier, priority_score, confidence, profile_url, follower_count, post_count, is_verified, is_business, business_category, bio, email_in_bio, phone_in_bio, external_url, seed_account, seed_type, scrape_date.<br><br>
-            <strong>Triggers deep dives</strong> on visible_watch_rank ≥ 8 → results land in <strong>Sheet A - Deep Dive</strong> (37 cols: Stage 1 + Horology + Wealth + Lifestyle).
+            <strong>Triage columns (Stage 1 only):</strong> username, full_name, classification, visible_watch_rank, net_worth_tier, priority_score, confidence, profile_url, follower_count, post_count, is_verified, is_business, is_private, business_category, bio, email_in_bio, phone_in_bio, external_url, seed_account, scrape_date.<br><br>
+            <strong>Triggers deep dives</strong> on visible_watch_rank ≥ 8 → results land in the 3 dataset sheets: <strong>4. Horology Data</strong>, <strong>5. Wealth Data</strong>, <strong>6. Lifestyle Data</strong>.
           </div>
         </div>
       </div>
@@ -586,12 +586,12 @@
             <div class="step-num" style="background: var(--accent);">B</div>
             <div class="step-title">Watchless UHNI</div>
           </div>
-          <div class="step-subtitle">UHNWI network — no watches but ultra-high wealth</div>
+          <div class="step-subtitle">"2. Triage - Watchless UHNI" — no watches but ultra-high wealth</div>
           <div class="step-detail">
-            <strong>Sheet B (20 cols, Stage 1 only):</strong> same triage fields as Sheet A.<br><br>
+            <strong>Triage columns (Stage 1 only):</strong> same fields as the Collectors/Dealers triage.<br><br>
             <strong>No horology data</strong> (no watches to analyze).<br>
-            <strong>Triggers Wealth + Lifestyle deep dives</strong> on every entry → results land in <strong>Sheet B - Deep Dive</strong> (32 cols).<br><br>
-            <strong>UHNWI gate:</strong> if Wealth deep dive returns non-Ultra-High → row auto-moves to Sheet C.
+            <strong>Triggers Wealth + Lifestyle deep dives</strong> on every entry → results land in <strong>5. Wealth Data</strong> and <strong>6. Lifestyle Data</strong>.<br><br>
+            <strong>UHNWI gate:</strong> if Wealth deep dive returns non-Ultra-High → row auto-moves to "3. Triage - Low Rank".
           </div>
         </div>
       </div>
@@ -619,17 +619,17 @@
         <div class="step-num" style="background: var(--accent);">7</div>
         <div class="step-title" style="color: var(--accent);">Stage 2 — Deep Dive (Rank 8-10 / UHNI only)</div>
       </div>
-      <div class="step-subtitle">Two n8n workflows: Horology + Wealth/Lifestyle (3 prompt kinds total)</div>
+      <div class="step-subtitle">Two n8n workflows → three independent data sheets</div>
       <div class="step-detail">
-        <strong>Trigger:</strong> Sheet A profiles with visible_watch_rank ≥ 8, OR all of Sheet B (UHNI).<br>
+        <strong>Trigger:</strong> Triage Collectors/Dealers with visible_watch_rank ≥ 8, OR all of Triage Watchless UHNI.<br>
         <strong>Image fetch:</strong> Fresh Apify scrape — up to <strong>50 images</strong> per profile (vs 10 in Stage 1).<br><br>
-        <strong>Workflow 2a — Horology</strong> (Sheet A 8-10 only, Gemini 2.5 <strong>Pro</strong>):<br>
-        watch_brands, specific_watches (brand + model + reference + value), watch_complications, watch_complication_tier (Tier 1/2/3), visible_recent_collection_value → written to <strong>Sheet A - Deep Dive</strong>.<br><br>
-        <strong>Workflow 2b — Wealth + Lifestyle</strong> (Sheet A 8-10 + Sheet B, Gemini 2.5 Flash, Wealth runs before Lifestyle per user):<br>
-        - <em>Wealth:</em> visible_wealth_tier, profession, business_sector (Real Estate / Crypto / Finance / Tech / Family Office / etc.), wealth_signals, approach_suggestion<br>
-        - <em>Lifestyle:</em> inferred_lifestyle_value, hobbies (Motorsport / Polo / Sailing / etc.), locations (Monaco / Aspen / Dubai), dining_preferences, vision_summary<br>
-        Results → <strong>Sheet A - Deep Dive</strong> (for Sheet A profiles) or <strong>Sheet B - Deep Dive</strong> (for Sheet B profiles).<br><br>
-        <strong>UHNWI gate (Lifestyle):</strong> Lifestyle runs only if Wealth confirms Ultra-High in BOTH visible_wealth_tier AND net_worth_tier.<br>
+        <strong>Workflow 2a — Horology</strong> (Collectors/Dealers 8-10 only, Gemini 2.5 <strong>Pro</strong>) → writes <strong>"4. Horology Data"</strong>:<br>
+        watch_brands, specific_watches (brand + model + reference + value), watch_complications, watch_complication_tier (Tier A/B/C — A=most complicated, C=basic), visible_recent_collection_value<br><br>
+        <strong>Workflow 2b — Wealth + Lifestyle</strong> (8-10 + UHNI, Gemini 2.5 Flash, Wealth before Lifestyle):<br>
+        - <em>Wealth</em> → writes <strong>"5. Wealth Data"</strong>: visible_wealth_tier, profession, business_sector (Real Estate / Crypto / Finance / Tech / Family Office / etc.), wealth_signals, approach_suggestion<br>
+        - <em>Lifestyle</em> → writes <strong>"6. Lifestyle Data"</strong>: inferred_lifestyle_value, hobbies (Motorsport / Polo / Sailing / etc.), locations (Monaco / Aspen / Dubai), dining_preferences, vision_summary<br><br>
+        <strong>Each dataset = its own sheet</strong>, keyed by username for cross-reference back to the triage sheets.<br>
+        <strong>UHNWI gate (Lifestyle):</strong> Lifestyle runs only if Wealth confirms Ultra-High in BOTH visible_wealth_tier AND net_worth_tier. If a UHNI fails this, it's moved to "3. Triage - Low Rank".<br>
         <strong>Cost:</strong> ~5x Stage 1 per profile (50 images vs 10, Pro for Horology, fresh Apify scrape) — but only ~15-20% of profiles trigger it.
       </div>
     </div>
@@ -874,10 +874,11 @@
         <div class="image-grid" id="image-grid"></div>
         <div style="margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap;">
           <button id="classify-btn" onclick="classifyProfile()">Stage 1 Triage</button>
-          <button class="secondary" onclick="deepDive('horology')" title="Deep horology analysis (Sheet A only)">Deep: Horology</button>
-          <button class="secondary" onclick="deepDive('wealth')" title="Wealth + business analysis">Deep: Wealth</button>
-          <button class="secondary" onclick="deepDive('lifestyle')" title="Hobbies, locations, lifestyle">Deep: Lifestyle</button>
+          <button id="dd-horology" class="secondary" onclick="deepDive('horology')" title="Deep horology analysis (collectors/dealers rank 8-10)">Deep: Horology</button>
+          <button id="dd-wealth" class="secondary" onclick="deepDive('wealth')" title="Wealth + business analysis">Deep: Wealth</button>
+          <button id="dd-lifestyle" class="secondary" onclick="deepDive('lifestyle')" title="Hobbies, locations, lifestyle">Deep: Lifestyle</button>
         </div>
+        <div id="deepdive-hint" style="font-size:12px; color:var(--text2); margin-top:6px;"></div>
         <div class="status-msg hidden" id="classify-status"></div>
       </div>
     </div>
@@ -1272,6 +1273,61 @@ async function classifyProfile() {
   btn.disabled = false;
 }
 
+function updateDeepDiveButtons(c) {
+  const cls = c.classification || '';
+  const rank = parseInt(c.visible_watch_rank) || 0;
+  const ntw = (c.net_worth_tier || '').toLowerCase();
+  const hBtn = document.getElementById('dd-horology');
+  const wBtn = document.getElementById('dd-wealth');
+  const lBtn = document.getElementById('dd-lifestyle');
+  const hint = document.getElementById('deepdive-hint');
+
+  const setBtn = (btn, enabled, reason) => {
+    btn.disabled = !enabled;
+    btn.style.opacity = enabled ? '1' : '0.4';
+    btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+    if (reason) btn.title = reason;
+  };
+
+  if (cls === 'collector' || cls === 'dealer') {
+    if (rank >= 8) {
+      setBtn(hBtn, true, 'Run Horology deep dive');
+      setBtn(wBtn, true, 'Run Wealth deep dive');
+      setBtn(lBtn, true, 'Run Lifestyle deep dive (needs Wealth = Ultra-High first)');
+      hint.textContent = 'Rank ' + rank + ' → Sheet A. Eligible for all 3 deep dives (Horology + Wealth + Lifestyle).';
+    } else if (ntw === 'ultra-high') {
+      // Low watch rank but ultra-high wealth → routed to Sheet B. Wealth + Lifestyle only (no Horology, rank too low).
+      setBtn(hBtn, false, 'Horology requires Sheet A + rank ≥ 8');
+      setBtn(wBtn, true, 'Run Wealth deep dive (ultra-high net worth → Sheet B)');
+      setBtn(lBtn, true, 'Run Lifestyle deep dive (needs Wealth = Ultra-High first)');
+      hint.textContent = 'Rank ' + rank + ' + ultra-high net worth → Sheet B (Watchless UHNI). Wealth + Lifestyle eligible.';
+    } else if (rank >= 6) {
+      setBtn(hBtn, false, 'Horology requires rank ≥ 8');
+      setBtn(wBtn, false, 'Wealth deep dive requires rank ≥ 8 or ultra-high net worth');
+      setBtn(lBtn, false, 'Lifestyle deep dive requires rank ≥ 8 or ultra-high net worth');
+      hint.textContent = 'Rank ' + rank + ' → Sheet A (triage only). Deep dive triggers at rank ≥ 8.';
+    } else {
+      setBtn(hBtn, false, 'Rank too low');
+      setBtn(wBtn, false, 'Rank too low and not ultra-high net worth');
+      setBtn(lBtn, false, 'Rank too low and not ultra-high net worth');
+      hint.textContent = 'Rank ' + rank + ' + net worth "' + (ntw || 'unknown') + '" → Sheet C (Low Rank). No deep dive.';
+    }
+  } else if (cls === 'hnw_no_watches') {
+    // Watchless UHNI: routes to Sheet B regardless of net_worth_tier. NO horology.
+    setBtn(hBtn, false, 'Not applicable — UHNI has no watches');
+    setBtn(wBtn, true, 'Run Wealth deep dive');
+    setBtn(lBtn, true, 'Run Lifestyle deep dive (needs Wealth = Ultra-High first)');
+    const tierNote = ntw === 'ultra-high' ? '' : ' (Net worth: ' + (ntw || 'unknown') + ' — Lifestyle gate requires Ultra-High)';
+    hint.textContent = 'Watchless UHNI → Horology skipped (no watches). Wealth + Lifestyle only.' + tierNote;
+  } else {
+    // irrelevant / replica → no deep dives
+    setBtn(hBtn, false, 'Not applicable for this classification');
+    setBtn(wBtn, false, 'Not applicable for this classification');
+    setBtn(lBtn, false, 'Not applicable for this classification');
+    hint.textContent = 'Low rank / irrelevant → routed to Low Rank sheet. No deep dive.';
+  }
+}
+
 function renderResults(c, raw) {
   const card = document.getElementById('results-card');
   card.classList.remove('hidden');
@@ -1294,14 +1350,24 @@ function renderResults(c, raw) {
   else if (ps >= 4) pEl.style.color = 'var(--yellow)';
   else pEl.style.color = 'var(--red)';
 
+  // Enable/disable deep dive buttons based on routing
+  updateDeepDiveButtons(c);
+
   // Stage 1 fields
   document.getElementById('res-confidence').textContent = c.confidence || '-';
   document.getElementById('res-networth').textContent = c.net_worth_tier || '-';
 
-  // Stage 2 fields — these only get filled after a deep dive runs
-  document.getElementById('res-lifestyle').textContent = c.inferred_lifestyle_value || '(pending deep dive)';
-  document.getElementById('res-brands').textContent = (c.watch_brands || []).join(', ') || '(pending deep dive)';
-  document.getElementById('res-wealth-signals').textContent = (c.wealth_signals || []).join(', ') || '(pending deep dive)';
+  // Stage 2 fields — placeholders depend on classification
+  const isUhni = c.classification === 'hnw_no_watches';
+  const isCollector = c.classification === 'collector' || c.classification === 'dealer';
+  const rank = parseInt(c.visible_watch_rank) || 0;
+  const eligible = (isCollector && rank >= 8) || isUhni;
+  const watchPlaceholder = isUhni ? 'N/A — no watches' : (eligible ? '(pending deep dive)' : '—');
+  const ddPlaceholder = eligible ? '(pending deep dive)' : '—';
+
+  document.getElementById('res-lifestyle').textContent = c.inferred_lifestyle_value || ddPlaceholder;
+  document.getElementById('res-brands').textContent = (c.watch_brands || []).join(', ') || watchPlaceholder;
+  document.getElementById('res-wealth-signals').textContent = (c.wealth_signals || []).join(', ') || ddPlaceholder;
 
   // Watches (filled by deep dive)
   const wl = document.getElementById('watches-list');
@@ -1325,14 +1391,17 @@ function renderResults(c, raw) {
     wl.appendChild(div);
   });
   if (!(c.specific_watches || []).length) {
-    wl.innerHTML = '<div style="color:var(--text2); font-size:13px;">No specific watches yet (run Deep Dive for rank ≥ 8 collectors)</div>';
+    const msg = isUhni ? 'N/A — Watchless UHNI (no watches to analyze)'
+              : eligible ? 'No specific watches yet — run Horology deep dive'
+              : 'No specific watches (rank too low for deep dive)';
+    wl.innerHTML = '<div style="color:var(--text2); font-size:13px;">' + msg + '</div>';
   }
 
   // Reasoning
   document.getElementById('res-reasoning').innerHTML =
     `<strong>Reasoning:</strong><br>${c.reasoning || 'N/A'}`;
-  document.getElementById('res-img-text').textContent = c.image_summary || c.vision_summary || '(pending deep dive)';
-  document.getElementById('res-approach').textContent = c.approach_suggestion || '(pending deep dive)';
+  document.getElementById('res-img-text').textContent = c.image_summary || c.vision_summary || ddPlaceholder;
+  document.getElementById('res-approach').textContent = c.approach_suggestion || ddPlaceholder;
 
   // Raw JSON
   document.getElementById('raw-json').textContent = JSON.stringify(c, null, 2);

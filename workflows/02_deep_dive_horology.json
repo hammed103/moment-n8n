@@ -1,0 +1,84 @@
+{
+  "name": "Stage 2a — Deep Dive: Horology",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": { "__rl": true, "mode": "url", "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "1. Triage - Collectors & Dealers", "cachedResultName": "1. Triage - Collectors & Dealers" },
+        "options": {}
+      },
+      "id": "read-triage-a",
+      "name": "Read Triage (Collectors/Dealers)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 200],
+      "credentials": { "googleApi": { "id": "0kIjsxY1xNUQys1T", "name": "Google Sheets account 2" } }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": { "__rl": true, "mode": "url", "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "4. Horology Data", "cachedResultName": "4. Horology Data" },
+        "options": {}
+      },
+      "id": "read-horology",
+      "name": "Read Horology Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 400],
+      "credentials": { "googleApi": { "id": "0kIjsxY1xNUQys1T", "name": "Google Sheets account 2" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Horology runs on Collectors/Dealers with visible_watch_rank >= 8 that aren't already in the Horology Data sheet.\nconst alreadyDone = new Set();\nfor (const item of $('Read Horology Data').all()) {\n  const u = (item.json.username || '').toLowerCase();\n  if (u) alreadyDone.add(u);\n}\nconst tasks = [];\nfor (const item of $('Read Triage (Collectors/Dealers)').all()) {\n  const p = item.json;\n  const rank = parseInt(p.visible_watch_rank) || 0;\n  if (rank < 8) continue;\n  const u = (p.username || '').toLowerCase();\n  if (alreadyDone.has(u)) continue;\n  tasks.push({ json: { username: p.username } });\n}\nreturn tasks;"
+      },
+      "id": "build-tasks",
+      "name": "Build Horology Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": { "batchSize": 1, "options": {} },
+      "id": "loop-tasks",
+      "name": "Process Each Task",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://207.180.208.209:3456/api/deep-dive",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"kind\": \"horology\",\n  \"username\": \"{{ $json.username }}\"\n}",
+        "options": { "timeout": 300000 }
+      },
+      "id": "call-horology",
+      "name": "Horology Deep Dive (UI API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Manual Trigger": { "main": [[{ "node": "Read Triage (Collectors/Dealers)", "type": "main", "index": 0 }, { "node": "Read Horology Data", "type": "main", "index": 0 }]] },
+    "Read Triage (Collectors/Dealers)": { "main": [[{ "node": "Build Horology Tasks", "type": "main", "index": 0 }]] },
+    "Read Horology Data": { "main": [[{ "node": "Build Horology Tasks", "type": "main", "index": 0 }]] },
+    "Build Horology Tasks": { "main": [[{ "node": "Process Each Task", "type": "main", "index": 0 }]] },
+    "Process Each Task": { "main": [[{ "node": "Horology Deep Dive (UI API)", "type": "main", "index": 0 }]] },
+    "Horology Deep Dive (UI API)": { "main": [[{ "node": "Process Each Task", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

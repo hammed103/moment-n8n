@@ -1,0 +1,114 @@
+{
+  "name": "Stage 2b — Deep Dive: Wealth + Lifestyle",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": { "__rl": true, "mode": "url", "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "1. Triage - Collectors & Dealers", "cachedResultName": "1. Triage - Collectors & Dealers" },
+        "options": {}
+      },
+      "id": "read-triage-a",
+      "name": "Read Triage (Collectors/Dealers)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 100],
+      "credentials": { "googleApi": { "id": "0kIjsxY1xNUQys1T", "name": "Google Sheets account 2" } }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": { "__rl": true, "mode": "url", "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "2. Triage - Watchless UHNI", "cachedResultName": "2. Triage - Watchless UHNI" },
+        "options": {}
+      },
+      "id": "read-triage-b",
+      "name": "Read Triage (Watchless UHNI)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 300],
+      "credentials": { "googleApi": { "id": "0kIjsxY1xNUQys1T", "name": "Google Sheets account 2" } }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": { "__rl": true, "mode": "url", "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "5. Wealth Data", "cachedResultName": "5. Wealth Data" },
+        "options": {}
+      },
+      "id": "read-wealth",
+      "name": "Read Wealth Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 500],
+      "credentials": { "googleApi": { "id": "0kIjsxY1xNUQys1T", "name": "Google Sheets account 2" } }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": { "__rl": true, "mode": "url", "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "6. Lifestyle Data", "cachedResultName": "6. Lifestyle Data" },
+        "options": {}
+      },
+      "id": "read-lifestyle",
+      "name": "Read Lifestyle Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 700],
+      "credentials": { "googleApi": { "id": "0kIjsxY1xNUQys1T", "name": "Google Sheets account 2" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Wealth + Lifestyle deep dives.\n// Targets: Collectors/Dealers rank>=8 + all Watchless UHNI.\n// Dedup: Wealth Data sheet (wealth done), Lifestyle Data sheet (lifestyle done).\nconst wealthDone = new Set();\nfor (const item of $('Read Wealth Data').all()) {\n  const u = (item.json.username || '').toLowerCase();\n  if (u) wealthDone.add(u);\n}\nconst lifestyleDone = new Set();\nfor (const item of $('Read Lifestyle Data').all()) {\n  const u = (item.json.username || '').toLowerCase();\n  if (u) lifestyleDone.add(u);\n}\n\nconst tasks = [];\n\n// Collectors/Dealers rank 8-10\nfor (const item of $('Read Triage (Collectors/Dealers)').all()) {\n  const p = item.json;\n  const rank = parseInt(p.visible_watch_rank) || 0;\n  if (rank < 8) continue;\n  const u = (p.username || '').toLowerCase();\n  if (!wealthDone.has(u)) tasks.push({ json: { username: p.username, kind: 'wealth' } });\n  if (!lifestyleDone.has(u)) tasks.push({ json: { username: p.username, kind: 'lifestyle' } });\n}\n\n// Watchless UHNI (all entries)\nfor (const item of $('Read Triage (Watchless UHNI)').all()) {\n  const p = item.json;\n  const u = (p.username || '').toLowerCase();\n  if (!u) continue;\n  if (!wealthDone.has(u)) tasks.push({ json: { username: p.username, kind: 'wealth' } });\n  if (!lifestyleDone.has(u)) tasks.push({ json: { username: p.username, kind: 'lifestyle' } });\n}\n\n// Ensure 'wealth' runs before 'lifestyle' for the same user (Lifestyle is UHNWI-gated on Wealth output)\ntasks.sort((a, b) => {\n  const ua = a.json.username.toLowerCase();\n  const ub = b.json.username.toLowerCase();\n  if (ua !== ub) return ua < ub ? -1 : 1;\n  if (a.json.kind === 'wealth' && b.json.kind === 'lifestyle') return -1;\n  if (a.json.kind === 'lifestyle' && b.json.kind === 'wealth') return 1;\n  return 0;\n});\n\nreturn tasks;"
+      },
+      "id": "build-tasks",
+      "name": "Build Wealth+Lifestyle Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": { "batchSize": 1, "options": {} },
+      "id": "loop-tasks",
+      "name": "Process Each Task",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://207.180.208.209:3456/api/deep-dive",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"kind\": \"{{ $json.kind }}\",\n  \"username\": \"{{ $json.username }}\"\n}",
+        "options": { "timeout": 300000 }
+      },
+      "id": "call-dd",
+      "name": "Deep Dive (UI API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 400],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Manual Trigger": { "main": [[{ "node": "Read Triage (Collectors/Dealers)", "type": "main", "index": 0 }, { "node": "Read Triage (Watchless UHNI)", "type": "main", "index": 0 }, { "node": "Read Wealth Data", "type": "main", "index": 0 }, { "node": "Read Lifestyle Data", "type": "main", "index": 0 }]] },
+    "Read Triage (Collectors/Dealers)": { "main": [[{ "node": "Build Wealth+Lifestyle Tasks", "type": "main", "index": 0 }]] },
+    "Read Triage (Watchless UHNI)": { "main": [[{ "node": "Build Wealth+Lifestyle Tasks", "type": "main", "index": 0 }]] },
+    "Read Wealth Data": { "main": [[{ "node": "Build Wealth+Lifestyle Tasks", "type": "main", "index": 0 }]] },
+    "Read Lifestyle Data": { "main": [[{ "node": "Build Wealth+Lifestyle Tasks", "type": "main", "index": 0 }]] },
+    "Build Wealth+Lifestyle Tasks": { "main": [[{ "node": "Process Each Task", "type": "main", "index": 0 }]] },
+    "Process Each Task": { "main": [[{ "node": "Deep Dive (UI API)", "type": "main", "index": 0 }]] },
+    "Deep Dive (UI API)": { "main": [[{ "node": "Process Each Task", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
