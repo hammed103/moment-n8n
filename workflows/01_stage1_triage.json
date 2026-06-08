@@ -88,7 +88,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Filter out private accounts and replica keywords\nconst replicaRx = /\\b(replica|1:1|superclone|super\\s*clone|aaa\\s*quality|clone|factory\\s*direct|fake|counterfeit|rep\\s*watch|reptime|dhgate|mirror\\s*quality)\\b/i;\nconst seedUsername = $('Process Each Seed').item.json.username;\nconst seedType = $('Process Each Seed').item.json.seed_type;\nconst out = [];\nfor (const item of $input.all()) {\n  const p = item.json;\n  if (!p.username || p.is_private) continue;\n  if (replicaRx.test(p.biography || '')) continue;\n  out.push({ json: { username: p.username, seed_account: seedUsername, seed_type: seedType } });\n}\nreturn out;"
+        "jsCode": "// Filter out private accounts and replica keywords.\n// seed_type is intentionally NOT forwarded — the classifier column captures\n// what the AI thinks the account is; seed_type stays on the Seeds tab where\n// it labels seed source (auction_house, individual_collector, follower_loop).\nconst replicaRx = /\\b(replica|1:1|superclone|super\\s*clone|aaa\\s*quality|clone|factory\\s*direct|fake|counterfeit|rep\\s*watch|reptime|dhgate|mirror\\s*quality)\\b/i;\nconst seedUsername = $('Process Each Seed').item.json.username;\nconst out = [];\nfor (const item of $input.all()) {\n  const p = item.json;\n  if (!p.username || p.is_private) continue;\n  if (replicaRx.test(p.biography || '')) continue;\n  out.push({ json: { username: p.username, seed_account: seedUsername } });\n}\nreturn out;"
       },
       "id": "filter-followers",
       "name": "Filter Public + Non-Replica",
@@ -102,7 +102,7 @@
         "url": "=http://207.180.208.209:3456/api/stage1-classify",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"username\": \"{{ $json.username }}\",\n  \"seed_account\": \"{{ $json.seed_account }}\",\n  \"seed_type\": \"{{ $json.seed_type }}\"\n}",
+        "jsonBody": "={\n  \"username\": \"{{ $json.username }}\",\n  \"seed_account\": \"{{ $json.seed_account }}\"\n}",
         "options": { "timeout": 180000 }
       },
       "id": "call-stage1",
