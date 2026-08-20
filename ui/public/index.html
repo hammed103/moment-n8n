@@ -711,7 +711,15 @@
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
           <div>
-            <label style="font-size: 12px; color: var(--text2); display: block; margin-bottom: 4px;">Max Followers to Extract</label>
+            <label style="font-size: 12px; color: var(--text2); display: block; margin-bottom: 4px;">List to Extract</label>
+            <select id="scrape-direction">
+              <option value="followers">Followers</option>
+              <option value="following">Following</option>
+              <option value="both">Both (followers + following)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size: 12px; color: var(--text2); display: block; margin-bottom: 4px;">Max per List</label>
             <input type="number" id="scrape-max-followers" value="50" min="1" max="1000" />
           </div>
           <div>
@@ -1626,6 +1634,7 @@ async function scrapeFollowers() {
     return;
   }
 
+  const direction = document.getElementById('scrape-direction').value || 'followers';
   const maxFollowers = parseInt(document.getElementById('scrape-max-followers').value) || 50;
   const minPosts = parseInt(document.getElementById('scrape-min-posts').value) || 10;
   const minFollowers = parseInt(document.getElementById('scrape-min-followers').value) || 50;
@@ -1633,7 +1642,8 @@ async function scrapeFollowers() {
 
   const btn = document.getElementById('scrape-btn');
   btn.disabled = true;
-  showStatus('scrape-status', `Extracting followers from @${username} via Apify... This may take 1-3 minutes.`, true);
+  const dirLabel = direction === 'both' ? 'followers + following' : direction;
+  showStatus('scrape-status', `Extracting ${dirLabel} from @${username} via Apify... This may take 1-3 minutes.`, true);
 
   // Hide previous results
   document.getElementById('scrape-summary').classList.add('hidden');
@@ -1643,7 +1653,7 @@ async function scrapeFollowers() {
     const res = await fetch('/api/scrape-followers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, maxFollowers, minPosts, minFollowers, filterReplicas }),
+      body: JSON.stringify({ username, maxFollowers, minPosts, minFollowers, filterReplicas, direction }),
     });
 
     const data = await res.json();

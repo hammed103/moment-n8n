@@ -20,13 +20,13 @@
         "sheetName": {
           "__rl": true,
           "mode": "list",
-          "value": "1. Triage - Collectors & Dealers",
-          "cachedResultName": "1. Triage - Collectors & Dealers"
+          "value": "Collector",
+          "cachedResultName": "Collector"
         },
         "options": {}
       },
       "id": "read-sheet-a",
-      "name": "Read Sheet A",
+      "name": "Read Collector",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [460, 200],
@@ -48,13 +48,41 @@
         "sheetName": {
           "__rl": true,
           "mode": "list",
-          "value": "2. Triage - Watchless UHNI",
-          "cachedResultName": "2. Triage - Watchless UHNI"
+          "value": "Dealer",
+          "cachedResultName": "Dealer"
+        },
+        "options": {}
+      },
+      "id": "read-dealer",
+      "name": "Read Dealer",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [460, 300],
+      "credentials": {
+        "googleApi": {
+          "id": "0kIjsxY1xNUQys1T",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/15nZGf7Sk8dVrKllalK8Dk6tq7yK8Z6Dr_jPODFEtI84/"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Watchless UHNWI",
+          "cachedResultName": "Watchless UHNWI"
         },
         "options": {}
       },
       "id": "read-sheet-b",
-      "name": "Read Sheet B",
+      "name": "Read Watchless UHNWI",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [460, 400],
@@ -95,7 +123,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Pick verified rank 8-10 from Sheet A and all UHNI from Sheet B as new flywheel seeds\nconst existingSeeds = new Set();\nfor (const s of $('Read Existing Seeds').all()) {\n  if (s.json.username) existingSeeds.add(s.json.username.toLowerCase());\n}\n\nconst targets = [];\nfor (const item of $('Read Sheet A').all()) {\n  const rank = parseInt(item.json.visible_watch_rank) || 0;\n  if (rank < 8) continue;\n  const u = (item.json.username || '').toLowerCase();\n  if (!u || existingSeeds.has(u)) continue;\n  targets.push({ json: { username: u, seed_type: 'follower_loop', source_sheet: 'A' } });\n}\nfor (const item of $('Read Sheet B').all()) {\n  const u = (item.json.username || '').toLowerCase();\n  if (!u || existingSeeds.has(u)) continue;\n  targets.push({ json: { username: u, seed_type: 'follower_loop', source_sheet: 'B' } });\n}\nreturn targets;"
+        "jsCode": "// Pick verified rank 8-10 from the Collector + Dealer tabs and all of Watchless UHNWI as new flywheel seeds\nconst existingSeeds = new Set();\nfor (const s of $('Read Existing Seeds').all()) {\n  if (s.json.username) existingSeeds.add(s.json.username.toLowerCase());\n}\n\nconst targets = [];\nfor (const item of [...$('Read Collector').all(), ...$('Read Dealer').all()]) {\n  const rank = parseInt(item.json.visible_watch_rank) || 0;\n  if (rank < 8) continue;\n  const u = (item.json.username || '').toLowerCase();\n  if (!u || existingSeeds.has(u)) continue;\n  targets.push({ json: { username: u, seed_type: 'follower_loop', source_sheet: 'collector_dealer' } });\n}\nfor (const item of $('Read Watchless UHNWI').all()) {\n  const u = (item.json.username || '').toLowerCase();\n  if (!u || existingSeeds.has(u)) continue;\n  targets.push({ json: { username: u, seed_type: 'follower_loop', source_sheet: 'watchless_uhnwi' } });\n}\nreturn targets;"
       },
       "id": "pick-targets",
       "name": "Pick Verified Targets",
@@ -191,9 +219,10 @@
     }
   ],
   "connections": {
-    "Manual Trigger": { "main": [[{ "node": "Read Sheet A", "type": "main", "index": 0 }, { "node": "Read Sheet B", "type": "main", "index": 0 }, { "node": "Read Existing Seeds", "type": "main", "index": 0 }]] },
-    "Read Sheet A": { "main": [[{ "node": "Pick Verified Targets", "type": "main", "index": 0 }]] },
-    "Read Sheet B": { "main": [[{ "node": "Pick Verified Targets", "type": "main", "index": 0 }]] },
+    "Manual Trigger": { "main": [[{ "node": "Read Collector", "type": "main", "index": 0 }, { "node": "Read Dealer", "type": "main", "index": 0 }, { "node": "Read Watchless UHNWI", "type": "main", "index": 0 }, { "node": "Read Existing Seeds", "type": "main", "index": 0 }]] },
+    "Read Collector": { "main": [[{ "node": "Pick Verified Targets", "type": "main", "index": 0 }]] },
+    "Read Dealer": { "main": [[{ "node": "Pick Verified Targets", "type": "main", "index": 0 }]] },
+    "Read Watchless UHNWI": { "main": [[{ "node": "Pick Verified Targets", "type": "main", "index": 0 }]] },
     "Read Existing Seeds": { "main": [[{ "node": "Pick Verified Targets", "type": "main", "index": 0 }]] },
     "Pick Verified Targets": { "main": [[{ "node": "Process Each Target", "type": "main", "index": 0 }]] },
     "Process Each Target": { "main": [[{ "node": "Scrape THEIR Following (Apify)", "type": "main", "index": 0 }]] },

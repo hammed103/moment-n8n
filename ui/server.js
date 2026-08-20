@@ -13,13 +13,18 @@ if (!GEMINI_API_KEY) console.warn("[warn] GEMINI_API_KEY not set — set the env
 const PROMPT_FILE = path.join(__dirname, "prompt_stage1.txt");
 const PROMPT_FILE_LEGACY = path.join(__dirname, "prompt.txt"); // kept for fallback / Phase 2 deep-dive
 // Stage 1 triage sheets (routing destinations)
-const SHEET_A = "1. Triage - Collectors & Dealers";
-const SHEET_B = "2. Triage - Watchless UHNI";
-const SHEET_C = "3. Triage - Low Rank";
+const SHEET_COLLECTORS = "Collector";
+const SHEET_DEALERS = "Dealer";
+const SHEET_WATCHLESS = "Watchless UHNWI";
+const SHEET_LOW_RANK = "Low Rank";
 // Stage 2 deep-dive sheets (one per dataset, independent)
-const SHEET_HOROLOGY = "4. Horology Data";
-const SHEET_WEALTH = "5. Wealth Data";
-const SHEET_LIFESTYLE = "6. Lifestyle Data";
+const SHEET_HOROLOGY = "Horology Data";
+const SHEET_WEALTH = "Wealth Data";
+const SHEET_LIFESTYLE = "Lifestyle Data";
+// Sheet groupings used by routing/gating logic
+const HIGH_RANK_TRIAGE_SHEETS = [SHEET_COLLECTORS, SHEET_DEALERS];
+const DEEP_DIVE_ELIGIBLE_SHEETS = [SHEET_COLLECTORS, SHEET_DEALERS, SHEET_WATCHLESS];
+const ALL_TRIAGE_SHEETS = [SHEET_COLLECTORS, SHEET_DEALERS, SHEET_WATCHLESS, SHEET_LOW_RANK];
 // CREDS lookup order (first hit wins):
 //   1. GOOGLE_CREDENTIALS_JSON env var (Railway/Docker style)
 //   2. /opt/moment-ui/google-creds.json (production VPS path)
@@ -209,20 +214,18 @@ app.post("/api/image-base64", async (req, res) => {
 // --- API: Classify profile with Gemini ---
 app.post("/api/classify", async (req, res) => {
   const { parts, profile } = req.body;
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-
-  const body = JSON.stringify({
-    contents: [{ parts }],
-    generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
-  });
 
   try {
-    const result = await postJSON(geminiUrl, body);
-    const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return res.status(400).json({ error: "No JSON in response", raw: text });
+    const { text, error: gemErr } = await callGemini("gemini-2.5-flash", parts, {
+      maxOutputTokens: 16384,
+      thinkingBudget: 2048,
+    });
+    if (gemErr) return res.status(502).json({ error: gemErr });
 
-    const classification = JSON.parse(jsonMatch[0]);
+    const classification = parseModelJSON(text);
+    if (!classification) {
+      return res.status(400).json({ error: "Could not parse JSON from AI response", raw: text.slice(0, 500) });
+    }
 
     // Normalize legacy field name
     if (classification.visible_watch_rank == null && classification.watch_collection_rank != null) {
@@ -375,10 +378,9 @@ app.post("/api/deep-dive", async (req, res) => {
 
     // 3. Look up Stage 1 result (need classification + rank for the prompt)
     const token = await getSheetsToken();
-    const sheetA = await sheetsGet(token, `${SHEET_A}!A1:AZ10000`);
-    const sheetB = await sheetsGet(token, `${SHEET_B}!A1:AZ10000`);
     let stage1Row = null, sourceSheet = null;
-    for (const [sheet, data] of [[SHEET_A, sheetA], [SHEET_B, sheetB]]) {
+    for (const sheet of DEEP_DIVE_ELIGIBLE_SHEETS) {
+      const data = await sheetsGet(token, `${sheet}!A1:AZ10000`);
       const rows = data.values || [];
       if (rows.length < 2) continue;
       const h = rows[0];
@@ -391,30 +393,31 @@ app.post("/api/deep-dive", async (req, res) => {
         break;
       }
     }
-    if (!stage1Row) return res.status(404).json({ error: "Profile not found in Sheet A or B (run Stage 1 first)" });
+    if (!stage1Row) return res.status(404).json({ error: "Profile not found in any Triage sheet (Collectors / Dealers / Watchless UHNI). Run Stage 1 first." });
 
-    // GATING per PDF spec:
-    //   - Horology: requires Sheet A AND visible_watch_rank >= 8
-    //   - Wealth: requires Sheet A rank>=8 OR Sheet B (UHNWI gate is checked POST-result for routing)
-    //   - Lifestyle: requires UHNWI gate already met (visible_wealth_tier=Ultra-High AND net_worth_tier=ultra-high from prior Wealth deep dive)
+    // GATING:
+    //   - Horology: requires Collectors or Dealers sheet AND visible_watch_rank >= 8
+    //   - Wealth:   requires (high-rank sheet AND rank >= 8) OR Watchless UHNI sheet
+    //   - Lifestyle: requires UHNWI confirmed (Ultra-High in both wealth tiers) + same sheet/rank gate
     const stage1Rank = parseInt(stage1Row.visible_watch_rank) || 0;
     const stage1NWT = (stage1Row.net_worth_tier || "").toLowerCase();
     const existingVWT = (stage1Row.visible_wealth_tier || "").toLowerCase();
+    const isHighRankSheet = HIGH_RANK_TRIAGE_SHEETS.includes(sourceSheet);
 
     if (kind === "horology") {
-      if (sourceSheet !== SHEET_A || stage1Rank < 8) {
-        return res.status(412).json({ error: `Horology gate: requires Sheet A AND visible_watch_rank >= 8. Got sheet=${sourceSheet}, rank=${stage1Rank}.`, gated: true });
+      if (!isHighRankSheet || stage1Rank < 8) {
+        return res.status(412).json({ error: `Horology gate: requires Collectors/Dealers sheet AND visible_watch_rank >= 8. Got sheet=${sourceSheet}, rank=${stage1Rank}.`, gated: true });
       }
     }
     if (kind === "wealth") {
       // Wealth runs to PRODUCE visible_wealth_tier, so we only check basic sheet+rank gate
-      if (sourceSheet === SHEET_A && stage1Rank < 8) {
-        return res.status(412).json({ error: `Wealth gate (Sheet A): requires visible_watch_rank >= 8. Got rank=${stage1Rank}.`, gated: true });
+      if (isHighRankSheet && stage1Rank < 8) {
+        return res.status(412).json({ error: `Wealth gate (Collectors/Dealers): requires visible_watch_rank >= 8. Got rank=${stage1Rank}.`, gated: true });
       }
-      // Sheet B always allowed (need to confirm UHNWI)
+      // Watchless UHNI always allowed (need to confirm UHNWI)
     }
     if (kind === "lifestyle") {
-      // visible_wealth_tier now lives in the dedicated Wealth Data sheet (written by the Wealth deep dive)
+      // visible_wealth_tier lives in the dedicated Wealth Data sheet (written by the Wealth deep dive)
       let lookupVWT = existingVWT;
       try {
         const ddData = await sheetsGet(token, `${SHEET_WEALTH}!A1:AZ10000`);
@@ -432,9 +435,8 @@ app.post("/api/deep-dive", async (req, res) => {
       if (!isUhnwi) {
         return res.status(412).json({ error: `Lifestyle gate: requires UHNWI (Ultra-High in both visible_wealth_tier AND net_worth_tier). Got vwt='${lookupVWT}', nwt='${stage1NWT}'. Run Wealth deep dive first.`, gated: true });
       }
-      // Also require sheet+rank for Sheet A
-      if (sourceSheet === SHEET_A && stage1Rank < 8) {
-        return res.status(412).json({ error: `Lifestyle gate (Sheet A): requires visible_watch_rank >= 8. Got rank=${stage1Rank}.`, gated: true });
+      if (isHighRankSheet && stage1Rank < 8) {
+        return res.status(412).json({ error: `Lifestyle gate (Collectors/Dealers): requires visible_watch_rank >= 8. Got rank=${stage1Rank}.`, gated: true });
       }
     }
 
@@ -455,15 +457,18 @@ app.post("/api/deep-dive", async (req, res) => {
 
     parts.push({ text: prompt });
 
-    // 5. Call Gemini — Horology uses Pro (more accurate for watch ID), Wealth/Lifestyle use Flash (cheaper)
-    const geminiModel = kind === "horology" ? "gemini-2.5-pro" : "gemini-2.5-flash";
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${GEMINI_API_KEY}`;
-    const result = await postJSON(geminiUrl, JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0.1, maxOutputTokens: 8192 } }));
-    const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return res.status(400).json({ error: "No JSON in response", raw: text });
-    const deepData = parseLooseJSON(jsonMatch[0]);
-    if (!deepData) return res.status(400).json({ error: "Could not parse JSON from AI response", raw: jsonMatch[0].slice(0, 500) });
+    // 5. Call Gemini — Horology uses Pro (more accurate for watch ID), Wealth/Lifestyle use Flash (cheaper).
+    //    Pro reasons harder, so it gets a bigger thinking budget AND a bigger output cap;
+    //    the deep-dive prompts return long arrays and used to truncate at 8192.
+    const isPro = kind === "horology";
+    const { text, error: gemErr } = await callGemini(isPro ? "gemini-2.5-pro" : "gemini-2.5-flash", parts, {
+      maxOutputTokens: isPro ? 24576 : 16384,
+      thinkingBudget: isPro ? 4096 : 2048,
+    });
+    if (gemErr) return res.status(502).json({ error: gemErr });
+
+    const deepData = parseModelJSON(text);
+    if (!deepData) return res.status(400).json({ error: "Could not parse JSON from AI response", raw: text.slice(0, 500) });
 
     // 6. Build update map by kind
     const today = new Date().toISOString().split("T")[0];
@@ -507,7 +512,7 @@ app.post("/api/deep-dive", async (req, res) => {
     const merged = { ...identity, ...updates };
     await writeRowByHeaders(token, targetSheet, username, merged);
 
-    // 8. (No auto-downgrade.) Watchless UHNI rows stay in Sheet B once routed there.
+    // 8. (No auto-downgrade.) Watchless UHNI rows stay in the Watchless sheet once routed there.
     //    The Lifestyle workflow still enforces its own UHNWI gate (Ultra-High in both tiers).
     //    If the Wealth deep dive returns "High" instead of "Ultra-High", that's fine — the row
     //    stays in Watchless UHNI for follow-up.
@@ -589,6 +594,128 @@ async function fetchProfileInternal(username, postLimit = 10) {
 }
 
 // Robust JSON parser — handles trailing commas, unclosed arrays/objects, and other AI quirks
+// --- Gemini call wrapper ---
+// Centralises the failure modes that all used to surface as the opaque
+// "No JSON in response" error:
+//   1. API-level errors (quota/429, bad key). postJSON resolves the error
+//      envelope, so `result.candidates` was undefined and `text` came back "".
+//   2. Thinking-token starvation. The 2.5 models spend thinking tokens out of
+//      maxOutputTokens, so a long prompt + many images could burn the whole
+//      8192 budget and return finishReason=MAX_TOKENS with no visible text.
+//   3. Safety / recitation blocks, which also yield an empty text part.
+// Retries the transient ones and reports the rest with the real reason.
+const GEMINI_RETRYABLE = new Set([429, 500, 502, 503, 504]);
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+async function callGemini(model, parts, opts = {}) {
+  const { maxOutputTokens = 16384, thinkingBudget = 2048, attempts = 3 } = opts;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+  const generationConfig = {
+    temperature: 0.1,
+    maxOutputTokens,
+    // Force pure JSON so the model can't wrap the object in prose or fences.
+    responseMimeType: "application/json",
+    // Cap thinking so it can never eat the entire output budget.
+    thinkingConfig: { thinkingBudget },
+  };
+  const body = JSON.stringify({ contents: [{ parts }], generationConfig });
+
+  let lastErr = "";
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    let result;
+    try {
+      result = await postJSON(url, body);
+    } catch (err) {
+      lastErr = `Gemini request failed: ${err.message}`;
+      if (attempt < attempts) { await sleep(1000 * attempt); continue; }
+      return { text: "", error: lastErr };
+    }
+
+    if (result && result.error) {
+      const code = result.error.code;
+      lastErr = `Gemini API error ${code || ""} ${result.error.status || ""}: ${result.error.message || ""}`.trim();
+      if (GEMINI_RETRYABLE.has(code) && attempt < attempts) { await sleep(1500 * attempt); continue; }
+      return { text: "", error: lastErr };
+    }
+
+    const blockReason = result?.promptFeedback?.blockReason;
+    if (blockReason) {
+      return { text: "", error: `Gemini blocked the prompt (${blockReason}) — usually a flagged image.` };
+    }
+
+    const candidate = result?.candidates?.[0];
+    const finishReason = candidate?.finishReason || "";
+    // Thinking models can emit several parts; keep every text one.
+    const text = (candidate?.content?.parts || []).map((x) => x.text || "").join("").trim();
+    if (text) return { text, finishReason };
+
+    lastErr = finishReason === "MAX_TOKENS"
+      ? `Gemini hit the ${maxOutputTokens}-token output cap before writing any JSON (finishReason=MAX_TOKENS). Try fewer images.`
+      : `Gemini returned an empty response${finishReason ? ` (finishReason=${finishReason})` : ""}.`;
+    if (attempt < attempts) { await sleep(1000 * attempt); continue; }
+    return { text: "", error: lastErr, finishReason };
+  }
+  return { text: "", error: lastErr || "Gemini returned no usable response." };
+}
+
+// Parse a model reply that should be a JSON object, tolerating any stray
+// prose or fences around it.
+function parseModelJSON(text) {
+  if (!text) return null;
+  const direct = parseLooseJSON(text);
+  if (direct && typeof direct === "object") return direct;
+  const m = text.match(/\{[\s\S]*\}/);
+  const inner = m ? parseLooseJSON(m[0]) : null;
+  if (inner && typeof inner === "object") return inner;
+  // Last resort: the reply was cut off mid-object (long specific_watches
+  // arrays do this). Close the open structures and keep what we got.
+  const objStart = text.indexOf("{");
+  return objStart === -1 ? null : repairTruncatedJSON(text.slice(objStart));
+}
+
+// Close the structures a truncated JSON object left open, discarding the
+// incomplete trailing value. Bracket counting ignores anything inside strings.
+function repairTruncatedJSON(raw) {
+  const stack = [];
+  let inString = false, escaped = false, lastSafe = -1;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; continue; }
+    if (c === "{" || c === "[") stack.push(c === "{" ? "}" : "]");
+    else if (c === "}" || c === "]") stack.pop();
+    // A comma or a just-closed structure is a point we can safely truncate at.
+    if (c === "," || c === "}" || c === "]") lastSafe = i;
+  }
+  if (!stack.length) return null; // not actually truncated — parseLooseJSON already tried
+  if (lastSafe === -1) return null;
+
+  // Drop the partial trailing value, then the comma that preceded it.
+  let body = raw.slice(0, lastSafe + 1).replace(/,\s*$/, "");
+  // Recount depth for the trimmed body and close it.
+  const closers = [];
+  inString = false; escaped = false;
+  for (const c of body) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === "{") closers.push("}");
+    else if (c === "[") closers.push("]");
+    else if (c === "}" || c === "]") closers.pop();
+  }
+  try { return JSON.parse(body + closers.reverse().join("")); } catch { return null; }
+}
+
 function parseLooseJSON(raw) {
   // First try: as-is
   try { return JSON.parse(raw); } catch {}
@@ -706,7 +833,7 @@ async function writeClassificationToSheets(profile, classification) {
     // so excluding them here keeps triage sheets from accidentally growing those columns.
   };
 
-  // --- Stage 1 Routing: Sheet A / B / C ---
+  // --- Stage 1 Routing: Collectors / Dealers / Watchless UHNI / Low Rank ---
   const cls = classification.classification || "";
   const rank = classification.visible_watch_rank || 0;
   const ntw = (classification.net_worth_tier || "").toLowerCase();
@@ -718,26 +845,29 @@ async function writeClassificationToSheets(profile, classification) {
   }
 }
 
-// Stage 1 routing rules per Jason's spec:
-//   - Collectors / Dealers with rank 6-10 → Sheet A
-//   - hnw_no_watches (with rank 0-1 + UHNI flag) → Sheet B
-//   - Everything else (low rank, irrelevant, replica) → Sheet C
+// Stage 1 routing rules (Jason's updated spec, June 2026):
+//   - Collector + rank 6-10 → "1. Triage - Collectors"
+//   - Dealer    + rank 6-10 → "2. Triage - Dealers"
+//   - hnw_no_watches + ultra-high → "3. Triage - Watchless UHNI"
+//   - Everything else (low rank, irrelevant, replica) → "4. Triage - Low Rank"
 function routeStage1(classification, visibleWatchRank, netWorthTier) {
   if (classification === "replica_dealer" || classification === "irrelevant") {
-    return SHEET_C;
+    return SHEET_LOW_RANK;
   }
-  // Sheet A = Collectors/Dealers with visible_watch_rank >= 6 (focus is on the watches)
-  if ((classification === "collector" || classification === "dealer") && visibleWatchRank >= 6) {
-    return SHEET_A;
+  if (classification === "collector" && visibleWatchRank >= 6) {
+    return SHEET_COLLECTORS;
   }
-  // Sheet B = Watchless UHNI / High-value prospects. Catches:
-  //   - hnw_no_watches (AI explicitly tagged as wealthy with no watch focus)
-  //   - ANY ultra-high net worth profile that didn't qualify for Sheet A
-  //     (e.g. a collector with rank 5 but ultra-high wealth — the wealth is what matters)
-  if (classification === "hnw_no_watches" || netWorthTier === "ultra-high") {
-    return SHEET_B;
+  if (classification === "dealer" && visibleWatchRank >= 6) {
+    return SHEET_DEALERS;
   }
-  return SHEET_C;
+  // Watchless UHNI requires BOTH the hnw_no_watches label AND ultra-high wealth.
+  // The previous logic also accepted any ultra-high tier on its own, which caused
+  // low-rank/irrelevant profiles whose AI flagged background luxury as "wealth"
+  // to leak into this sheet. Those now correctly fall through to Low Rank.
+  if (classification === "hnw_no_watches" && netWorthTier === "ultra-high") {
+    return SHEET_WATCHLESS;
+  }
+  return SHEET_LOW_RANK;
 }
 
 // Generic: read headers from a sheet, map data to correct columns, write/update
@@ -908,36 +1038,54 @@ app.post("/api/seeds", async (req, res) => {
   }
 });
 
-// --- API: Scrape followers from a seed account ---
+// --- API: Scrape followers and/or following from a seed account ---
+// `direction` selects the Apify actor:
+//   "followers" (default) — accounts that follow the seed
+//   "following"           — accounts the seed follows (what Stage 3 seed-loop uses)
+//   "both"                — runs both actors and merges, `maxFollowers` applies per list
+const SCRAPE_ACTORS = {
+  followers: "datadoping~instagram-followers-scraper",
+  following: "datadoping~instagram-followings-scraper",
+};
+
 app.post("/api/scrape-followers", async (req, res) => {
-  const { username, maxFollowers, minPosts, minFollowers, filterReplicas } = req.body;
+  const { username, maxFollowers, minPosts, minFollowers, filterReplicas, direction } = req.body;
   if (!username) return res.status(400).json({ error: "Username required" });
 
+  const mode = (direction || "followers").toLowerCase();
+  if (!["followers", "following", "both"].includes(mode)) {
+    return res.status(400).json({ error: `Invalid direction '${direction}' — use followers, following, or both.` });
+  }
+  const sources = mode === "both" ? ["followers", "following"] : [mode];
+
   const apifyToken = APIFY_TOKEN;
+  if (!apifyToken) return res.status(500).json({ error: "APIFY_TOKEN is not set on the server — scrapes cannot run." });
   const maxCount = maxFollowers || 50;
   const minP = minPosts ?? 10;
   const minF = minFollowers ?? 50;
 
   try {
-    // Step 1: Start the follower scraper
-    const runUrl = `https://api.apify.com/v2/acts/datadoping~instagram-followers-scraper/runs?token=${apifyToken}&waitForFinish=300`;
-    const runResult = await postJSON(runUrl, JSON.stringify({
-      usernames: [username],
-      max_count: maxCount,
-    }));
+    // Steps 1+2: run each requested actor and pull its dataset.
+    const followers = [];
+    const scrapedBySource = {};
+    for (const source of sources) {
+      const runUrl = `https://api.apify.com/v2/acts/${SCRAPE_ACTORS[source]}/runs?token=${apifyToken}&waitForFinish=300`;
+      const runResult = await postJSON(runUrl, JSON.stringify({
+        usernames: [username],
+        max_count: maxCount,
+      }));
 
-    if (!runResult?.data?.defaultDatasetId) {
-      return res.status(400).json({ error: "Scraper failed - no dataset returned. Account may be private.", raw: runResult });
-    }
+      if (!runResult?.data?.defaultDatasetId) {
+        return res.status(400).json({ error: `${source} scraper failed - no dataset returned. Account may be private.`, raw: runResult });
+      }
 
-    const datasetId = runResult.data.defaultDatasetId;
-
-    // Step 2: Fetch the dataset
-    const dataUrl = `https://api.apify.com/v2/datasets/${datasetId}/items?token=${apifyToken}&format=json`;
-    const followers = await fetchJSONFromURL(dataUrl);
-
-    if (!Array.isArray(followers)) {
-      return res.status(400).json({ error: "Unexpected dataset format", raw: followers });
+      const dataUrl = `https://api.apify.com/v2/datasets/${runResult.data.defaultDatasetId}/items?token=${apifyToken}&format=json`;
+      const items = await fetchJSONFromURL(dataUrl);
+      if (!Array.isArray(items)) {
+        return res.status(400).json({ error: `Unexpected dataset format from ${source} scraper`, raw: items });
+      }
+      scrapedBySource[source] = items.length;
+      for (const item of items) followers.push({ ...item, _source: source });
     }
 
     // Step 3: Filter
@@ -962,6 +1110,7 @@ app.post("/api/scrape-followers", async (req, res) => {
         biography: f.biography || "",
         follower_count: f.follower_count || f.edge_followed_by?.count || 0,
         profile_pic: f.profile_pic_url || "",
+        source_list: f._source || "followers",
       });
     }
 
@@ -1014,7 +1163,7 @@ app.post("/api/scrape-followers", async (req, res) => {
         "",                                  // avg_comments
         today,                               // scrape_date
         username,                            // seed_account
-        "follower_scrape",                   // seed_type
+        `${f.source_list}_scrape`,           // seed_type (follower_scrape / following_scrape)
         `https://instagram.com/${f.username}` // profile_url
       ]);
     }
@@ -1027,12 +1176,14 @@ app.post("/api/scrape-followers", async (req, res) => {
 
     res.json({
       seed: username,
+      direction: mode,
       total_scraped: followers.length,
+      scraped_by_source: scrapedBySource,
       after_filter: filtered.length,
       written_to_sheets: sheetsWritten,
       duplicate_profiles: duplicateProfiles.length,
       rejected,
-      filters_applied: { maxFollowers: maxCount, minPosts: minP, minFollowers: minF, filterReplicas: filterReplicas !== false },
+      filters_applied: { direction: mode, maxFollowers: maxCount, minPosts: minP, minFollowers: minF, filterReplicas: filterReplicas !== false },
       followers: filtered,
     });
   } catch (err) {
@@ -1042,14 +1193,14 @@ app.post("/api/scrape-followers", async (req, res) => {
 
 // --- API: Get profiles with classification status ---
 // In the new pipeline, the Profiles sheet is deprecated.
-// We build the profile list from the union of Sheet A, B, C (Stage 1 sheets).
+// We build the profile list from the union of all four Stage 1 triage sheets.
 app.get("/api/profiles", async (req, res) => {
   try {
     const token = await getSheetsToken();
     const profileMap = new Map();
 
-    // Order matters: A first (richest), then B, then C - first hit wins
-    for (const sheetName of [SHEET_A, SHEET_B, SHEET_C]) {
+    // Order matters: high-rank sheets first, then Watchless, then Low Rank - first hit wins
+    for (const sheetName of ALL_TRIAGE_SHEETS) {
       try {
         const full = await sheetsGet(token, `${sheetName}!A1:AZ10000`);
         const rows = full.values || [];
