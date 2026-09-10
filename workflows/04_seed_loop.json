@@ -145,7 +145,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://api.apify.com/v2/acts/datadoping~instagram-followings-scraper/runs?token={{ $env.APIFY_TOKEN }}&waitForFinish=300",
+        "url": "=https://api.apify.com/v2/acts/datadoping~instagram-following-scraper/runs?token={{ $env.APIFY_TOKEN }}&waitForFinish=300",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"usernames\": [\"{{ $json.username }}\"],\n  \"max_count\": 50\n}",

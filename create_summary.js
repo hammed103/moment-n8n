@@ -66,10 +66,10 @@ async function main() {
     console.log('Created Summary sheet:', addRes.status);
   }
 
-  // Column references:
+  // Column references (these depend on actual sheet header layout - verify after first run):
   // Profiles: A=username, E=follower_count, F=following_count, G=post_count, H=is_verified, I=is_business, J=business_category, K=external_url, M=email_in_bio, N=phone_in_bio, O=engagement_rate, AD=seed_account, AE=seed_type
-  // Classified Leads: A=username, R=classification, S=confidence, X=net_worth_tier, AC=priority_score, P=seed_account
-  // Relevant Leads: A=username, C=classification, D=priority_score, E=confidence, U=email_in_bio, V=phone_in_bio, W=external_url, AA=seed_account
+  // Classified Leads: A=username, R=classification, S=confidence, Y=net_worth_tier, AD=priority_score, P=seed_account, W=watch_collection_rank, X=wealth_rank
+  // Relevant Leads: A=username, C=classification, D=priority_score, E=watch_collection_rank, F=wealth_rank, G=confidence, W=email_in_bio, X=phone_in_bio, Y=external_url, AC=seed_account
 
   const rows = [
     ['PIPELINE OVERVIEW', '', '', ''],
@@ -87,9 +87,11 @@ async function main() {
     ['Collector', '=COUNTIF(\'Classified Leads\'!R:R,"collector")', '=IF(B4>0,B12/B4,0)', ''],
     ['Dealer', '=COUNTIF(\'Classified Leads\'!R:R,"dealer")', '=IF(B4>0,B13/B4,0)', ''],
     ['Enthusiast', '=COUNTIF(\'Classified Leads\'!R:R,"enthusiast")', '=IF(B4>0,B14/B4,0)', ''],
-    ['Media/Influencer', '=COUNTIF(\'Classified Leads\'!R:R,"media")+COUNTIF(\'Classified Leads\'!R:R,"influencer")', '=IF(B4>0,B15/B4,0)', ''],
-    ['Irrelevant', '=COUNTIF(\'Classified Leads\'!R:R,"irrelevant")', '=IF(B4>0,B16/B4,0)', ''],
-    ['Error/Unknown', '=COUNTIF(\'Classified Leads\'!R:R,"error")+COUNTIF(\'Classified Leads\'!R:R,"unknown")', '=IF(B4>0,B17/B4,0)', ''],
+    ['Qualified HNW', '=COUNTIF(\'Classified Leads\'!R:R,"qualified_hnw")', '=IF(B4>0,B15/B4,0)', ''],
+    ['Replica Dealer', '=COUNTIF(\'Classified Leads\'!R:R,"replica_dealer")', '=IF(B4>0,B16/B4,0)', ''],
+    ['Media/Influencer', '=COUNTIF(\'Classified Leads\'!R:R,"media")+COUNTIF(\'Classified Leads\'!R:R,"influencer")', '=IF(B4>0,B17/B4,0)', ''],
+    ['Irrelevant', '=COUNTIF(\'Classified Leads\'!R:R,"irrelevant")', '=IF(B4>0,B18/B4,0)', ''],
+    ['Error/Unknown', '=COUNTIF(\'Classified Leads\'!R:R,"error")+COUNTIF(\'Classified Leads\'!R:R,"unknown")', '=IF(B4>0,B19/B4,0)', ''],
     ['', '', '', ''],
 
     ['PROFILE STATISTICS', '', '', ''],
@@ -115,18 +117,18 @@ async function main() {
 
     ['NET WORTH DISTRIBUTION', '', '', ''],
     ['Tier', 'Count', '', ''],
-    ['Ultra High Net Worth', '=COUNTIF(\'Classified Leads\'!X:X,"*ultra*")', '', ''],
-    ['High Net Worth', '=COUNTIF(\'Classified Leads\'!X:X,"*high*")-COUNTIF(\'Classified Leads\'!X:X,"*ultra*")', '', ''],
-    ['Medium Net Worth', '=COUNTIF(\'Classified Leads\'!X:X,"*medium*")+COUNTIF(\'Classified Leads\'!X:X,"*moderate*")', '', ''],
-    ['Unknown/Other', '=MAX(0,B4-B39-B40-B41)', '', ''],
+    ['Ultra High Net Worth', '=COUNTIF(\'Classified Leads\'!Y:Y,"*ultra*")', '', ''],
+    ['High Net Worth', '=COUNTIF(\'Classified Leads\'!Y:Y,"*high*")-COUNTIF(\'Classified Leads\'!Y:Y,"*ultra*")', '', ''],
+    ['Medium Net Worth', '=COUNTIF(\'Classified Leads\'!Y:Y,"*medium*")+COUNTIF(\'Classified Leads\'!Y:Y,"*moderate*")', '', ''],
+    ['Unknown/Other', '=MAX(0,B4-B41-B42-B43)', '', ''],
     ['', '', '', ''],
 
     ['CONTACTABLE RELEVANT LEADS', '', '', ''],
     ['Metric', 'Value', '', ''],
-    ['With Email', '=COUNTIFS(\'Relevant Leads\'!U2:U,"<>")', '', ''],
-    ['With Phone', '=COUNTIFS(\'Relevant Leads\'!V2:V,"<>")', '', ''],
-    ['With External URL', '=COUNTIFS(\'Relevant Leads\'!W2:W,"<>")', '', ''],
-    ['With Any Contact Info', '=SUMPRODUCT(((\'Relevant Leads\'!U2:U<>"")*1+(\'Relevant Leads\'!V2:V<>"")*1+(\'Relevant Leads\'!W2:W<>"")*1)>0)', '', ''],
+    ['With Email', '=COUNTIFS(\'Relevant Leads\'!W2:W,"<>")', '', ''],
+    ['With Phone', '=COUNTIFS(\'Relevant Leads\'!X2:X,"<>")', '', ''],
+    ['With External URL', '=COUNTIFS(\'Relevant Leads\'!Y2:Y,"<>")', '', ''],
+    ['With Any Contact Info', '=SUMPRODUCT(((\'Relevant Leads\'!W2:W<>"")*1+(\'Relevant Leads\'!X2:X<>"")*1+(\'Relevant Leads\'!Y2:Y<>"")*1)>0)', '', ''],
     ['', '', '', ''],
 
     ['SEED ACCOUNT PERFORMANCE', '', '', ''],
@@ -148,18 +150,18 @@ async function main() {
   console.log('Updated Summary:', updateRes.status);
 
   // Now add the dynamic seed account list using UNIQUE + SORT
-  // Row 53 is where seed data starts (after the header row at 52)
+  // Row 55 is where seed data starts (after the header row at 54, shifted +2 from added classification rows)
   const seedFormulas = [
-    ['=IFERROR(SORT(UNIQUE(Profiles!AD2:AD)),"")', '=ARRAYFORMULA(IF(A53:A="","",COUNTIF(Profiles!AD:AD,A53:A)))', '=ARRAYFORMULA(IF(A53:A="","",COUNTIF(\'Classified Leads\'!P:P,A53:A)))', '=ARRAYFORMULA(IF(A53:A="","",COUNTIF(\'Relevant Leads\'!AA:AA,A53:A)))'],
+    ['=IFERROR(SORT(UNIQUE(Profiles!AD2:AD)),"")', '=ARRAYFORMULA(IF(A55:A="","",COUNTIF(Profiles!AD:AD,A55:A)))', '=ARRAYFORMULA(IF(A55:A="","",COUNTIF(\'Classified Leads\'!P:P,A55:A)))', '=ARRAYFORMULA(IF(A55:A="","",COUNTIF(\'Relevant Leads\'!AC:AC,A55:A)))'],
   ];
 
   const seedRes = await httpReq({
     hostname: 'sheets.googleapis.com',
-    path: '/v4/spreadsheets/' + SHEET_ID + '/values/Summary!A53?valueInputOption=USER_ENTERED',
+    path: '/v4/spreadsheets/' + SHEET_ID + '/values/Summary!A55?valueInputOption=USER_ENTERED',
     method: 'PUT',
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }
   }, JSON.stringify({
-    range: 'Summary!A53',
+    range: 'Summary!A55',
     majorDimension: 'ROWS',
     values: seedFormulas
   }));
@@ -185,7 +187,7 @@ async function main() {
   }, JSON.stringify({
     requests: [
       // Bold section headers
-      ...[0, 9, 18, 29, 37, 43, 50].map(row => ({
+      ...[0, 9, 20, 31, 39, 45, 52].map(row => ({
         repeatCell: {
           range: { sheetId: summarySheetId, startRowIndex: row, endRowIndex: row + 1, startColumnIndex: 0, endColumnIndex: 4 },
           cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 12 }, backgroundColor: { red: 0.2, green: 0.4, blue: 0.7 }, horizontalAlignment: 'LEFT' } },
@@ -193,7 +195,7 @@ async function main() {
         }
       })),
       // Bold sub-headers
-      ...[1, 10, 19, 30, 38, 44, 51].map(row => ({
+      ...[1, 10, 21, 32, 40, 46, 53].map(row => ({
         repeatCell: {
           range: { sheetId: summarySheetId, startRowIndex: row, endRowIndex: row + 1, startColumnIndex: 0, endColumnIndex: 4 },
           cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: { red: 0.85, green: 0.85, blue: 0.85 } } },
@@ -201,7 +203,7 @@ async function main() {
         }
       })),
       // White text on blue headers
-      ...[0, 9, 18, 29, 37, 43, 50].map(row => ({
+      ...[0, 9, 20, 31, 39, 45, 52].map(row => ({
         repeatCell: {
           range: { sheetId: summarySheetId, startRowIndex: row, endRowIndex: row + 1, startColumnIndex: 0, endColumnIndex: 4 },
           cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 12, foregroundColor: { red: 1, green: 1, blue: 1 } }, backgroundColor: { red: 0.2, green: 0.4, blue: 0.7 } } },
@@ -223,10 +225,10 @@ async function main() {
           fields: 'userEnteredFormat.numberFormat'
         }
       },
-      // Format % column in classification breakdown (C12:C17)
+      // Format % column in classification breakdown (C12:C19)
       {
         repeatCell: {
-          range: { sheetId: summarySheetId, startRowIndex: 11, endRowIndex: 17, startColumnIndex: 2, endColumnIndex: 3 },
+          range: { sheetId: summarySheetId, startRowIndex: 11, endRowIndex: 19, startColumnIndex: 2, endColumnIndex: 3 },
           cell: { userEnteredFormat: { numberFormat: { type: 'PERCENT', pattern: '0.0%' } } },
           fields: 'userEnteredFormat.numberFormat'
         }

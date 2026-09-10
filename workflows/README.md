@@ -83,7 +83,7 @@ See `/Watch Complication Tier List.md` for the full tier definition.
 **Flow:**
 1. Manual trigger → Read `Collector` + `Dealer` + `Watchless UHNWI` + `Sheet1` (existing seeds)
 2. Pick verified targets
-3. For each target → Apify `datadoping~instagram-followings-scraper` (50 accounts they follow)
+3. For each target → Apify `datadoping~instagram-following-scraper` (50 accounts they follow)
 4. Dedup against existing seeds → append new rows with `seed_type = "follower_loop"`
 
 **Result:** Next run of Workflow 1 picks up the new seeds and the cycle continues.

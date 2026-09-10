@@ -1045,7 +1045,7 @@ app.post("/api/seeds", async (req, res) => {
 //   "both"                — runs both actors and merges, `maxFollowers` applies per list
 const SCRAPE_ACTORS = {
   followers: "datadoping~instagram-followers-scraper",
-  following: "datadoping~instagram-followings-scraper",
+  following: "datadoping~instagram-following-scraper",
 };
 
 app.post("/api/scrape-followers", async (req, res) => {
